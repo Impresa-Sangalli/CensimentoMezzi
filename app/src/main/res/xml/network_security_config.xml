@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Il sito aziendale usa il certificato *.impresasangalli.it di GoDaddy, emesso dalla radice
+     "GoDaddy TLS Root CA - R1": sui telefoni Android meno recenti questa radice non è ancora tra quelle
+     di sistema, quindi per i soli siti impresasangalli.it viene aggiunta a quelle del telefono.
+     Solo HTTPS: nessun traffico in chiaro. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">impresasangalli.it</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/godaddy_tls_root_r1" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

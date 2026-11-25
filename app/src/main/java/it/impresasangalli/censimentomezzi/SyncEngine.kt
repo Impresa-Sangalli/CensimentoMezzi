@@ -6,149 +6,196 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.IOException
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
-import javax.net.ssl.SSLException
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
- * Invio automatico dei censimenti a SharePoint.
- * Ogni censimento salvato entra in coda; la coda viene svuotata appena
- * c'è connessione (anche ad app chiusa, tramite JobScheduler).
+ * Sincronizzazione con il sito:
+ *  1. configurazione (zone, tipi di veicolo, provvedimenti);
+ *  2. invio della coda (entrate, foto, uscite, spostamenti, correzioni) in ordine;
+ *  3. ricezione delle modifiche del piazzale fatte dall'ufficio o dagli altri telefoni.
+ * Senza rete (fuori dal Wi-Fi aziendale) tutto resta in coda e riparte appena il sito è raggiungibile.
  */
 object SyncEngine {
-    enum class Outcome { DONE, RETRY, STOP }
-
     @Volatile var running = false
         private set
-    @Volatile var cancel = false
     @Volatile var listener: (() -> Unit)? = null
 
-    private fun notifyUi() {
-        try { listener?.invoke() } catch (_: Exception) {}
-    }
+    private val D_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+    private val T_FMT = DateTimeFormatter.ofPattern("HH:mm:ss")
 
-    private fun friendly(e: IOException): String = when (e) {
-        is UnknownHostException, is ConnectException -> "Nessuna connessione internet: invio rimandato"
-        is SocketTimeoutException -> "Connessione troppo lenta: invio rimandato"
-        is SSLException -> "Connessione interrotta: invio rimandato"
-        else -> e.message ?: e.toString()
-    }
+    private fun notifyUi() { try { listener?.invoke() } catch (_: Exception) {} }
 
-    fun run(ctx0: Context): Outcome {
+    /** Restituisce true se tutto è stato sincronizzato, false se va ripetuto più tardi. */
+    fun run(ctx0: Context): Boolean {
         val ctx = ctx0.applicationContext
-        synchronized(this) {
-            if (running) return Outcome.DONE
-            running = true
-            cancel = false
-        }
+        synchronized(this) { if (running) return true; running = true }
         notifyUi()
-        val cfg = Config(ctx)
+        val cfg = ServerConfig(ctx)
         val db = Db(ctx)
         try {
-            if (!cfg.ready() || !Auth.signedIn(ctx)) return Outcome.STOP
-            if (!db.hasWork()) return Outcome.DONE
-
-            val g = Graph({ force -> Auth.accessToken(ctx, force) })
-            val drive = cfg.driveId ?: g.driveId(g.resolveSite(cfg.siteUrl)).also { cfg.driveId = it }
-            val ra = RemoteArchive(g, drive, cfg.folder, cfg.excelName, Config.TABLE, cfg.excelItemId)
-
-            while (!cancel) {
-                val c = db.nextPending() ?: break
+            if (!cfg.collegato()) return true
+            val srv = Server(ctx)
+            aggiornaConfig(srv, cfg)
+            while (true) {
+                val op = db.prossimaOperazione() ?: break
                 try {
-                    if (c.syncState == SyncState.PENDING) {
-                        val bytes = PhotoStore.readBytes(ctx, c.uri)
-                        if (bytes == null) {
-                            db.setPhotoSent(c.id, c.nomeFile, "Foto non trovata sul telefono: inviata solo la riga Excel")
-                        } else {
-                            db.setPhotoSent(c.id, ra.uploadPhoto(c.targa, c.nomeFile, bytes), null)
-                        }
-                        notifyUi()
-                    }
-                    val cur = db.get(c.id) ?: continue
-                    val row = Exporter.cells(cur.copy(nomeFile = cur.remoteName ?: cur.nomeFile))
-                    ra.appendRow(Config.SHEET, Exporter.HEADER, Exporter.WIDTHS, row)
-                    cfg.excelItemId = ra.excelItemId
-                    db.setSent(c.id, cur.dataUscita)
-                    cfg.lastOk = System.currentTimeMillis()
-                    cfg.lastError = null
-                } catch (e: GraphException) {
-                    // errori temporanei o di configurazione: si ferma e riprova più tardi
-                    if (e.retryable || e.code == 401 || e.code == 403) throw e
-                    db.setFailed(c.id, e.message ?: "Errore ${e.code}")
+                    esegui(ctx, srv, db, op)
+                } catch (e: ErroreServer) {
+                    if (e.nonAutorizzato || !e.definitivo) throw e
+                    db.tentativo(op.id, e.message ?: "Errore", true)   // dato rifiutato dal sito: resta visibile, la coda prosegue
                 }
                 notifyUi()
             }
-
-            // Date di uscita inserite o modificate dopo l'invio: aggiorna la riga già su SharePoint
-            while (!cancel) {
-                val c = db.nextUscitaUpdate() ?: break
-                try {
-                    val row = Exporter.cells(c.copy(nomeFile = c.remoteName ?: c.nomeFile))
-                    val found = ra.updateRow(row, Exporter.KEY_COLUMN)
-                    cfg.excelItemId = ra.excelItemId
-                    db.setUscitaSynced(c.id, c.dataUscita,
-                        if (found) null else "Riga non trovata nel file Excel su SharePoint: data di uscita non aggiornata")
-                    cfg.lastOk = System.currentTimeMillis()
-                    cfg.lastError = null
-                } catch (e: GraphException) {
-                    if (e.retryable || e.code == 401 || e.code == 403) throw e
-                    db.setUscitaSynced(c.id, c.dataUscita, "Data di uscita non aggiornata su SharePoint: ${e.message ?: e.code}")
-                }
-                notifyUi()
+            ricevi(srv, db, cfg)
+            cfg.ultimaSync = System.currentTimeMillis()
+            cfg.ultimoErrore = null
+            return true
+        } catch (e: ErroreServer) {
+            if (e.nonAutorizzato) {
+                cfg.token = null
+                cfg.ultimoErrore = "Telefono scollegato dall'ufficio: serve un nuovo codice di attivazione"
+                return true
             }
-            return if (db.hasWork()) Outcome.RETRY else Outcome.DONE
-        } catch (e: AuthRequiredException) {
-            cfg.lastError = "Accesso Microsoft scaduto: accedere di nuovo dalla scheda ONLINE"
-            return Outcome.STOP
-        } catch (e: GraphException) {
-            if (e.code == 404) cfg.clearRemoteCache()
-            cfg.lastError = e.message
-            return Outcome.RETRY
+            cfg.ultimoErrore = Server.messaggio(e)
+            return false
         } catch (e: IOException) {
-            cfg.lastError = friendly(e)
-            return Outcome.RETRY
+            cfg.ultimoErrore = Server.messaggio(e)
+            return false
         } catch (e: Exception) {
-            cfg.lastError = "Errore imprevisto: $e"
-            return Outcome.RETRY
+            cfg.ultimoErrore = "Errore imprevisto: ${e.message ?: e}"
+            return false
         } finally {
             running = false
             notifyUi()
         }
     }
+
+    private fun aggiornaConfig(srv: Server, cfg: ServerConfig) {
+        val j = srv.get("config")
+        val z = j.optJSONArray("zone") ?: JSONArray()
+        if (z.length() > 0) cfg.zone = (0 until z.length()).map { z.getString(it) }
+        cfg.tipiJson = (j.optJSONArray("tipi_veicolo") ?: JSONArray()).toString()
+        val p = j.optJSONArray("provvedimenti") ?: JSONArray()
+        if (p.length() > 0) cfg.provvedimenti = (0 until p.length()).map { p.getString(it) }
+        cfg.nomeTelefono = j.optJSONObject("dispositivo")?.optString("nome") ?: cfg.nomeTelefono
+    }
+
+    /* ---------- invio ---------- */
+    private fun esegui(ctx: Context, srv: Server, db: Db, op: Operazione) {
+        val c = db.perUuid(op.uuid)
+        val risposta: JSONObject? = when (op.tipo) {
+            TipoOp.INGRESSO -> if (c == null) null else srv.post("ingressi", corpoIngresso(c))
+            TipoOp.FOTO -> {
+                // foto non più presente sul telefono (eliminata dalla galleria): l'operazione si chiude senza invio
+                if (c != null && c.uri.isNotEmpty()) {
+                    val bytes = PhotoStore.readBytes(ctx, c.uri)
+                    if (bytes != null) srv.postFoto("ingressi/${op.uuid}/foto",
+                        mapOf("foto_uuid" to op.dati.optString("foto_uuid"), "scattata_il" to isoIngresso(c)), c.nomeFile.ifEmpty { "${c.targa}.jpg" }, bytes)
+                }
+                null
+            }
+            TipoOp.USCITA -> srv.post("ingressi/${op.uuid}/uscita", JSONObject().put("data_uscita", op.dati.opt("data_uscita") ?: JSONObject.NULL))
+            TipoOp.ZONA -> srv.post("ingressi/${op.uuid}/zona", JSONObject().put("zona", op.dati.optString("zona")))
+            TipoOp.CORREZIONE -> srv.post("ingressi/${op.uuid}/correzione", op.dati)
+            else -> null
+        }
+        db.completata(op.id)
+        if (op.tipo == TipoOp.INGRESSO) db.segnaSulServer(op.uuid)
+        // la risposta del sito diventa la copia locale, se non ci sono altre modifiche del telefono ancora da inviare
+        risposta?.optJSONObject("permanenza")?.let { if (!db.haOperazioni(op.uuid)) db.salvaDalServer(daJson(it)) }
+    }
+
+    private fun isoIngresso(c: Censimento): String = try {
+        LocalDateTime.of(LocalDate.parse(c.data, D_FMT), LocalTime.parse(c.ora, T_FMT)).toString()
+    } catch (e: Exception) {
+        LocalDateTime.now().withNano(0).toString()
+    }
+
+    private fun corpoIngresso(c: Censimento): JSONObject = JSONObject()
+        .put("uuid", c.uuid).put("targa", c.targa).put("zona", c.zona)
+        .put("data_ingresso", isoIngresso(c))
+        .put("data_uscita", c.dataUscita?.let { try { LocalDate.parse(it, D_FMT).toString() } catch (e: Exception) { null } } ?: JSONObject.NULL)
+        .put("marca", c.marca ?: JSONObject.NULL).put("modello", c.modello ?: JSONObject.NULL).put("colore", c.colore ?: JSONObject.NULL)
+        .put("tipo_veicolo_id", c.tipoId ?: JSONObject.NULL)
+        .put("pratica_numero", c.pratica ?: JSONObject.NULL).put("ente", c.ente ?: JSONObject.NULL)
+        .put("provvedimento", c.provvedimento ?: JSONObject.NULL).put("note", c.note ?: JSONObject.NULL)
+
+    /* ---------- ricezione ---------- */
+    private fun ricevi(srv: Server, db: Db, cfg: ServerConfig) {
+        val j = srv.get("piazzale" + (cfg.cursore?.let { "?dal=$it" } ?: ""))
+        val a = j.optJSONArray("permanenze") ?: JSONArray()
+        for (i in 0 until a.length()) {
+            val p = a.getJSONObject(i)
+            val uuid = p.getString("uuid")
+            if (db.haOperazioni(uuid)) continue          // prima si inviano le modifiche fatte sul telefono
+            if (p.optBoolean("rimuovi")) db.rimuoviPerUuid(uuid) else db.salvaDalServer(daJson(p))
+        }
+        cfg.cursore = j.getString("cursore")
+    }
+
+    private fun testo(o: JSONObject, k: String): String? = if (o.isNull(k)) null else o.optString(k).ifEmpty { null }
+
+    /** Permanenza del sito → copia locale. */
+    fun daJson(p: JSONObject): Censimento {
+        val ing = try { LocalDateTime.parse(p.getString("data_ingresso")) } catch (e: Exception) { LocalDateTime.now() }
+        val foto = p.optJSONArray("foto") ?: JSONArray()
+        return Censimento(
+            id = 0, targa = p.getString("targa"), zona = p.getString("zona"),
+            data = ing.toLocalDate().format(D_FMT), ora = ing.toLocalTime().withNano(0).format(T_FMT),
+            nomeFile = "", uri = "", ts = ing.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            dataUscita = testo(p, "data_uscita")?.let { try { LocalDate.parse(it).format(D_FMT) } catch (e: Exception) { null } },
+            uuid = p.getString("uuid"),
+            marca = testo(p, "marca"), modello = testo(p, "modello"), colore = testo(p, "colore"),
+            tipoId = if (p.isNull("tipo_veicolo_id")) null else p.optInt("tipo_veicolo_id"),
+            tipoNome = testo(p, "tipo_veicolo"),
+            pratica = testo(p, "pratica_numero"), ente = testo(p, "ente"), provvedimento = testo(p, "provvedimento"), note = testo(p, "note"),
+            fotoIds = (0 until foto.length()).map { foto.getJSONObject(it).getLong("id") },
+            sulServer = true,
+        )
+    }
 }
 
-/** Job di sistema che esegue l'invio quando la rete è disponibile. */
+/** Job di sistema: sincronizza appena c'è rete e comunque ogni 15 minuti (anche ad app chiusa). */
 class SyncJobService : JobService() {
     companion object {
-        private const val JOB_ID = 4242
+        private const val JOB_SUBITO = 4242
+        private const val JOB_PERIODICO = 4244
 
-        /** Accoda un invio: parte subito se c'è rete, altrimenti appena torna. */
+        /** Avvia una sincronizzazione appena possibile (e assicura quella periodica). */
         fun schedule(ctx: Context) {
-            if (SyncEngine.running) return
-            val cfg = Config(ctx)
-            if (!cfg.ready() || !Auth.signedIn(ctx)) return
+            if (!ServerConfig(ctx).collegato()) return
             val js = ctx.getSystemService(JobScheduler::class.java) ?: return
-            val job = JobInfo.Builder(JOB_ID, ComponentName(ctx, SyncJobService::class.java))
+            val comp = ComponentName(ctx, SyncJobService::class.java)
+            if (!SyncEngine.running) js.schedule(JobInfo.Builder(JOB_SUBITO, comp)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
-                .setPersisted(true)
-                .build()
-            js.schedule(job)
+                .setPersisted(true).build())
+            if (js.getPendingJob(JOB_PERIODICO) == null) js.schedule(JobInfo.Builder(JOB_PERIODICO, comp)
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setPeriodic(15 * 60 * 1000L)
+                .setPersisted(true).build())
+        }
+
+        fun annulla(ctx: Context) {
+            val js = ctx.getSystemService(JobScheduler::class.java) ?: return
+            js.cancel(JOB_SUBITO); js.cancel(JOB_PERIODICO)
         }
     }
 
     override fun onStartJob(params: JobParameters): Boolean {
         Thread {
-            val r = SyncEngine.run(this)
-            jobFinished(params, r == SyncEngine.Outcome.RETRY)
+            val ok = SyncEngine.run(this)
+            jobFinished(params, !ok && params.jobId == JOB_SUBITO)
         }.start()
         return true
     }
 
-    override fun onStopJob(params: JobParameters): Boolean {
-        SyncEngine.cancel = true
-        return true
-    }
+    override fun onStopJob(params: JobParameters): Boolean = true
 }
