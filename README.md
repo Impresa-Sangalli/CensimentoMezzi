@@ -5,7 +5,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 
 | | |
 |---|---|
-| Versione | 1.3 (`versionCode` 4) |
+| Versione | 1.4 (`versionCode` 5) |
 | Package | `it.impresasangalli.censimentomezzi` |
 | Android | 8.0 o superiore (`minSdk` 26, `targetSdk` 34) |
 | Linguaggio | Kotlin, solo componenti standard di Android (niente Jetpack Compose né librerie esterne) |
@@ -29,7 +29,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 - Esportazione Excel (`.xlsx`) e ZIP (Excel + cartella `foto/`), condivisione
 - "Azzera archivio"
 
-**ONLINE** – invio automatico a SharePoint *(predisposto ma **non attivo**, vedi sotto)*
+**ONLINE** – invio automatico a SharePoint (vedi sotto) e aggiornamenti dell'app
 
 ### Data di uscita
 Per registrarla dopo il censimento:
@@ -134,18 +134,27 @@ Le nuove versioni **devono** essere firmate con lo stesso `debug.keystore`
 - A ogni nuova versione aumentare `android:versionCode` e `android:versionName` in
   `app/src/main/AndroidManifest.xml`.
 
-## Invio a SharePoint (predisposto, non attivo)
+## Invio a SharePoint (attivo dalla versione 1.4)
 
-Il codice per l'invio automatico a SharePoint tramite Microsoft Graph è presente
-(scheda ONLINE), ma **non è attivo**: si è deciso di tenere il censimento solo sul dispositivo.
-Senza configurazione l'app mostra "Invio online non configurato" e non invia nulla.
+Ogni censimento salvato viene inviato al sito
+[Censimento Mezzi](https://impresasangalli.sharepoint.com/sites/CensimentoMezzi) tramite Microsoft Graph.
+Il telefono resta l'archivio principale: senza rete i censimenti restano in coda e partono appena torna la connessione.
 
-Limiti noti:
-- una data di uscita inserita **dopo** l'invio non aggiorna la riga già caricata su SharePoint;
-- la parte SharePoint è stata provata solo contro un server simulato, **non sul tenant reale**.
+- Sul telefono basta accedere con l'account Microsoft aziendale (scheda ONLINE): tenant, ID
+  applicazione e sito sono già nel codice (`Config.kt`). Non sono segreti: senza un account
+  autorizzato non danno accesso a nulla.
+- Gli operatori devono essere **Membri** del sito (permesso di modifica sulla raccolta Documenti).
+- Una data di uscita inserita o modificata **dopo** l'invio aggiorna la riga già presente nel file
+  Excel su SharePoint (la riga si individua dal nome della foto, unico per ogni censimento).
+- Eliminare un censimento sul telefono **non** lo cancella da SharePoint.
+- Al primo accesso l'app chiede se inviare anche i censimenti già presenti sul telefono.
+
+Registrazione dell'app in Microsoft Entra ID: *Censimento Mezzi*, tenant singolo, client pubblico
+(nessun segreto), autorizzazioni delegate Microsoft Graph `Files.ReadWrite.All`, `User.Read`,
+`offline_access`, `openid`, `profile` con consenso amministratore.
 
 <details>
-<summary>Come si attiverebbe (riferimento)</summary>
+<summary>Dettagli tecnici</summary>
 
 Struttura su SharePoint:
 ```
@@ -164,9 +173,8 @@ Configurazione una tantum a cura dell'IT (Microsoft Entra ID):
 4. Comunicare: ID applicazione (client), ID directory (tenant), indirizzo del sito SharePoint.
    Gli operatori devono avere permesso di modifica sulla raccolta Documenti del sito.
 
-Sul telefono: scheda ONLINE › Configurazione (amministratore) › inserire i dati › Salva ›
-accedere con l'account Microsoft aziendale. In alternativa i valori possono essere inseriti
-in `Config.kt` (`DEFAULT_…`) prima di compilare.
+I valori predefiniti sono in `Config.kt` (`DEFAULT_…`); dalla scheda ONLINE ›
+Configurazione (amministratore) si possono sovrascrivere su un singolo telefono.
 </details>
 
 ## Struttura del codice

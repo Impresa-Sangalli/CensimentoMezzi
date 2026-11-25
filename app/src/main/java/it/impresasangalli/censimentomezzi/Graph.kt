@@ -138,6 +138,28 @@ class Graph(
         return json(r, "riga Excel", 200, 201).optInt("index", -1)
     }
 
+    /**
+     * Indice (0 = prima riga dati) della riga della tabella in cui la colonna [column]
+     * contiene [key]; -1 se non presente. Cerca dall'ultima riga, la più recente.
+     */
+    fun findRow(driveId: String, itemId: String, table: String, column: Int, key: String): Int {
+        // values della colonna: [[intestazione], [riga 0], [riga 1], ...]
+        val r = req("GET", "/drives/$driveId/items/$itemId/workbook/tables/${enc(table)}/columns/itemAt(index=$column)")
+        val values = json(r, "colonna Excel", 200).optJSONArray("values") ?: return -1
+        for (i in values.length() - 1 downTo 1) {
+            val cell = values.optJSONArray(i)?.opt(0)?.toString() ?: continue
+            if (cell.trim().equals(key, ignoreCase = true)) return i - 1
+        }
+        return -1
+    }
+
+    /** Sostituisce i valori della riga [index] della tabella. */
+    fun updateRow(driveId: String, itemId: String, table: String, index: Int, values: JSONArray) {
+        val body = JSONObject().put("values", JSONArray().put(values)).toString().toByteArray(Charsets.UTF_8)
+        val r = req("PATCH", "/drives/$driveId/items/$itemId/workbook/tables/${enc(table)}/rows/itemAt(index=$index)/range", body)
+        json(r, "riga Excel", 200, 204)
+    }
+
     /** Imposta il formato numerico (data/ora/testo) della riga appena aggiunta. */
     fun formatRow(driveId: String, itemId: String, table: String, index: Int, formats: JSONArray) {
         val body = JSONObject().put("numberFormat", JSONArray().put(formats)).toString().toByteArray(Charsets.UTF_8)
@@ -222,5 +244,31 @@ class RemoteArchive(
             }
         }
         throw IOException("Impossibile aggiornare il file Excel $excelName")
+    }
+
+    /**
+     * Riscrive la riga già presente su SharePoint, individuata dal nome della foto
+     * (colonna [keyColumn], unico per ogni censimento). Restituisce false se la riga
+     * o il file Excel non esistono più.
+     */
+    fun updateRow(row: List<Cell>, keyColumn: Int): Boolean {
+        val key = (row[keyColumn] as? Cell.Text)?.v ?: return false
+        val path = p(excelName)
+        repeat(2) {
+            val id = excelItemId ?: g.item(driveId, path)?.getString("id") ?: return false
+            excelItemId = id
+            try {
+                val idx = g.findRow(driveId, id, table, keyColumn, key)
+                if (idx < 0) return false
+                g.updateRow(driveId, id, table, idx, JSONArray(row.map { value(it) }))
+                try { g.formatRow(driveId, id, table, idx, JSONArray(row.map { format(it) })) } catch (_: Exception) {}
+                return true
+            } catch (e: GraphException) {
+                if (e.code != 404) throw e
+                if (g.item(driveId, path) == null) { excelItemId = null; return false }   // file Excel eliminato
+                table = g.tables(driveId, id).firstOrNull() ?: return false              // tabella rinominata
+            }
+        }
+        return false
     }
 }

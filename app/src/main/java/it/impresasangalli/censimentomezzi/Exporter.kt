@@ -34,6 +34,8 @@ object Exporter {
     const val MIME_ZIP = "application/zip"
     val HEADER = listOf("Targa", "Zona parcheggio", "Data censimento", "Ora censimento", "Nome file fotografia", "Data uscita")
     val WIDTHS = listOf(16.0, 18.0, 18.0, 17.0, 28.0, 16.0)
+    /** Colonna "Nome file fotografia": unica per ogni censimento, identifica la riga su SharePoint. */
+    const val KEY_COLUMN = 4
     private val D_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy")
     private val T_FMT = DateTimeFormatter.ofPattern("HH:mm:ss")
 

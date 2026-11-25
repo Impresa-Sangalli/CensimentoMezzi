@@ -748,7 +748,11 @@ class MainActivity : Activity() {
             else row.addView(text("● Nel piazzale", 14f, GREEN, true))
             if (Config(this@MainActivity).ready()) {
                 val (label, color) = when (c.syncState) {
-                    SyncState.SENT -> "✓ Inviato a SharePoint" to GREEN
+                    SyncState.SENT -> when {
+                        c.uscitaDirty -> "⏳ Data di uscita da aggiornare su SharePoint" to ORANGE
+                        c.syncError != null -> "✓ Inviato a SharePoint · ⚠ ${c.syncError}" to ORANGE
+                        else -> "✓ Inviato a SharePoint" to GREEN
+                    }
                     SyncState.FAILED -> "⚠ Non inviato: ${c.syncError ?: "errore"}" to RED
                     SyncState.EXCLUDED -> "Non inviato (registrato prima dell'attivazione)" to GREY
                     else -> "⏳ In attesa di invio" to ORANGE
@@ -870,13 +874,20 @@ class MainActivity : Activity() {
         val min = try { LocalDate.parse(c.data, D_FMT) } catch (e: Exception) { LocalDate.now() }
         val current = c.dataUscita?.let { try { LocalDate.parse(it, D_FMT) } catch (e: Exception) { null } }
         val onClear: (() -> Unit)? = if (c.dataUscita == null) null else ({
-            db.setUscita(c.id, null); refreshList(); refreshSummary(); checkDuplicate(); toast("Data di uscita rimossa: ${c.targa} risulta nel piazzale")
+            db.setUscita(c.id, null); uscitaChanged(); toast("Data di uscita rimossa: ${c.targa} risulta nel piazzale")
         })
         pickUscita(current, min, onClear) { d ->
             db.setUscita(c.id, d.format(D_FMT))
-            refreshList(); refreshSummary(); checkDuplicate()
+            uscitaChanged()
             toast("${c.targa}: uscita il ${d.format(D_FMT)}")
         }
+    }
+
+    /** Dopo una modifica della data di uscita: aggiorna le viste e, se già inviato, SharePoint. */
+    private fun uscitaChanged() {
+        refreshList(); refreshSummary(); checkDuplicate()
+        SyncJobService.schedule(this)
+        refreshSyncStatus()
     }
 
     private fun confirmDelete(c: Censimento) {
@@ -1083,7 +1094,7 @@ class MainActivity : Activity() {
         if (!::tvSync.isInitialized) return
         val cfg = Config(this)
         val sc = db.syncCounts()
-        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0)
+        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0) + db.uscitaUpdatesPending()
         val failed = sc[SyncState.FAILED] ?: 0
         val (msg, color) = when {
             !cfg.ready() -> "Invio online non configurato · tocca qui" to 0xFF757575.toInt()
@@ -1274,7 +1285,7 @@ class MainActivity : Activity() {
         val cfg = Config(this)
         val sc = db.syncCounts()
         val sent = sc[SyncState.SENT] ?: 0
-        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0)
+        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0) + db.uscitaUpdatesPending()
         val failed = sc[SyncState.FAILED] ?: 0
         val signed = Auth.signedIn(this)
         val sb = StringBuilder()

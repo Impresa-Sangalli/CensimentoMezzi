@@ -16,11 +16,12 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class Config(ctx: Context) {
     companion object {
-        // Valori predefiniti: l'IT può inserirli qui prima di compilare,
-        // così non vanno digitati su ogni telefono.
-        const val DEFAULT_TENANT = ""            // es. impresasangalli.it oppure l'ID tenant
-        const val DEFAULT_CLIENT_ID = ""         // ID applicazione (client) registrata in Entra ID
-        const val DEFAULT_SITE_URL = ""          // es. https://impresasangalli.sharepoint.com/sites/Logistica
+        // Valori predefiniti, così sui telefoni basta accedere con l'account Microsoft.
+        // Non sono segreti: senza un account aziendale autorizzato non danno accesso a nulla.
+        // Registrazione app Entra ID "Censimento Mezzi" (tenant singolo, client pubblico con PKCE).
+        const val DEFAULT_TENANT = "59ff1ff3-833a-47c5-b37b-7f83e0e47aae"      // ID directory (tenant)
+        const val DEFAULT_CLIENT_ID = "234311e4-c481-490a-a3ee-0e9353e4456a"   // ID applicazione (client)
+        const val DEFAULT_SITE_URL = "https://impresasangalli.sharepoint.com/sites/CensimentoMezzi"
         const val DEFAULT_FOLDER = "Censimento Mezzi"
         const val DEFAULT_EXCEL = "Censimento_Mezzi.xlsx"
         const val TABLE = "TabellaCensimento"

@@ -29,11 +29,12 @@ data class Censimento(
     val remoteName: String? = null,
     val syncError: String? = null,
     val syncedAt: Long = 0,
-    val dataUscita: String? = null   // dd/MM/yyyy, facoltativa: compilata quando il mezzo esce
+    val dataUscita: String? = null,  // dd/MM/yyyy, facoltativa: compilata quando il mezzo esce
+    val uscitaDirty: Boolean = false // data di uscita cambiata dopo l'invio: da aggiornare su SharePoint
 )
 
 /** Archivio locale persistente (SQLite), nessuna connessione richiesta. */
-class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db", null, 3) {
+class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -50,7 +51,8 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
                 remote_name TEXT,
                 sync_error TEXT,
                 synced_at INTEGER NOT NULL DEFAULT 0,
-                data_uscita TEXT)"""
+                data_uscita TEXT,
+                uscita_dirty INTEGER NOT NULL DEFAULT 0)"""
         )
         db.execSQL("CREATE INDEX idx_targa ON censimenti(targa)")
         db.execSQL("CREATE INDEX idx_sync ON censimenti(sync_state)")
@@ -66,6 +68,9 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
         }
         if (oldV < 3) {
             db.execSQL("ALTER TABLE censimenti ADD COLUMN data_uscita TEXT")
+        }
+        if (oldV < 4) {
+            db.execSQL("ALTER TABLE censimenti ADD COLUMN uscita_dirty INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -91,7 +96,8 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
         cur.getString(cur.getColumnIndexOrThrow("remote_name")),
         cur.getString(cur.getColumnIndexOrThrow("sync_error")),
         cur.getLong(cur.getColumnIndexOrThrow("synced_at")),
-        cur.getString(cur.getColumnIndexOrThrow("data_uscita"))
+        cur.getString(cur.getColumnIndexOrThrow("data_uscita")),
+        cur.getInt(cur.getColumnIndexOrThrow("uscita_dirty")) != 0
     )
 
     private fun query(where: String?, args: Array<String>?, order: String, limit: String? = null): List<Censimento> {
@@ -119,10 +125,14 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
         }
     }
 
-    /** Imposta (o cancella, con null) la data di uscita dal piazzale. */
+    /**
+     * Imposta (o cancella, con null) la data di uscita dal piazzale.
+     * Se il censimento è già su SharePoint, la riga remota viene aggiornata al prossimo invio.
+     */
     fun setUscita(id: Long, data: String?) {
         val v = ContentValues()
         v.put("data_uscita", data)
+        v.put("uscita_dirty", 1)
         upd(id, v)
     }
 
@@ -158,11 +168,38 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
         upd(id, v)
     }
 
-    fun setSent(id: Long) {
-        val v = ContentValues()
-        v.put("sync_state", SyncState.SENT); v.put("synced_at", System.currentTimeMillis())
-        upd(id, v)
+    /**
+     * Riga inviata con la data di uscita [sentUscita]. Se nel frattempo la data è stata
+     * cambiata sul telefono, resta da aggiornare su SharePoint.
+     */
+    fun setSent(id: Long, sentUscita: String?) {
+        writableDatabase.execSQL(
+            "UPDATE censimenti SET sync_state = ${SyncState.SENT}, synced_at = ?, " +
+                "uscita_dirty = CASE WHEN IFNULL(data_uscita, '') = ? THEN 0 ELSE 1 END WHERE id = ?",
+            arrayOf<Any>(System.currentTimeMillis(), sentUscita ?: "", id)
+        )
     }
+
+    /** Censimento già inviato la cui data di uscita va aggiornata su SharePoint. */
+    fun nextUscitaUpdate(): Censimento? =
+        query("sync_state = ${SyncState.SENT} AND uscita_dirty = 1", null, "ts ASC, id ASC", "1").firstOrNull()
+
+    fun uscitaUpdatesPending(): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM censimenti WHERE sync_state = ${SyncState.SENT} AND uscita_dirty = 1", null).use {
+            it.moveToFirst(); return it.getInt(0)
+        }
+    }
+
+    /** Data di uscita [sent] riportata su SharePoint (resta da aggiornare se nel frattempo è cambiata). */
+    fun setUscitaSynced(id: Long, sent: String?, note: String?) {
+        writableDatabase.execSQL(
+            "UPDATE censimenti SET uscita_dirty = CASE WHEN IFNULL(data_uscita, '') = ? THEN 0 ELSE 1 END, sync_error = ? WHERE id = ?",
+            arrayOf<Any?>(sent ?: "", note, id)
+        )
+    }
+
+    /** Ci sono invii da fare (nuovi censimenti o date di uscita da aggiornare). */
+    fun hasWork(): Boolean = nextPending() != null || nextUscitaUpdate() != null
 
     fun setFailed(id: Long, msg: String) {
         val v = ContentValues()

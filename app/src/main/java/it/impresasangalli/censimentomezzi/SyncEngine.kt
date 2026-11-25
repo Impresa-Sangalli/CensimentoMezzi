@@ -48,7 +48,7 @@ object SyncEngine {
         val db = Db(ctx)
         try {
             if (!cfg.ready() || !Auth.signedIn(ctx)) return Outcome.STOP
-            if (db.nextPending() == null) return Outcome.DONE
+            if (!db.hasWork()) return Outcome.DONE
 
             val g = Graph({ force -> Auth.accessToken(ctx, force) })
             val drive = cfg.driveId ?: g.driveId(g.resolveSite(cfg.siteUrl)).also { cfg.driveId = it }
@@ -70,7 +70,7 @@ object SyncEngine {
                     val row = Exporter.cells(cur.copy(nomeFile = cur.remoteName ?: cur.nomeFile))
                     ra.appendRow(Config.SHEET, Exporter.HEADER, Exporter.WIDTHS, row)
                     cfg.excelItemId = ra.excelItemId
-                    db.setSent(c.id)
+                    db.setSent(c.id, cur.dataUscita)
                     cfg.lastOk = System.currentTimeMillis()
                     cfg.lastError = null
                 } catch (e: GraphException) {
@@ -80,7 +80,25 @@ object SyncEngine {
                 }
                 notifyUi()
             }
-            return if (db.nextPending() == null) Outcome.DONE else Outcome.RETRY
+
+            // Date di uscita inserite o modificate dopo l'invio: aggiorna la riga già su SharePoint
+            while (!cancel) {
+                val c = db.nextUscitaUpdate() ?: break
+                try {
+                    val row = Exporter.cells(c.copy(nomeFile = c.remoteName ?: c.nomeFile))
+                    val found = ra.updateRow(row, Exporter.KEY_COLUMN)
+                    cfg.excelItemId = ra.excelItemId
+                    db.setUscitaSynced(c.id, c.dataUscita,
+                        if (found) null else "Riga non trovata nel file Excel su SharePoint: data di uscita non aggiornata")
+                    cfg.lastOk = System.currentTimeMillis()
+                    cfg.lastError = null
+                } catch (e: GraphException) {
+                    if (e.retryable || e.code == 401 || e.code == 403) throw e
+                    db.setUscitaSynced(c.id, c.dataUscita, "Data di uscita non aggiornata su SharePoint: ${e.message ?: e.code}")
+                }
+                notifyUi()
+            }
+            return if (db.hasWork()) Outcome.RETRY else Outcome.DONE
         } catch (e: AuthRequiredException) {
             cfg.lastError = "Accesso Microsoft scaduto: accedere di nuovo dalla scheda ONLINE"
             return Outcome.STOP
