@@ -5,7 +5,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 
 | | |
 |---|---|
-| Versione | 1.4 (`versionCode` 5) |
+| Versione | 1.5 (`versionCode` 6) |
 | Package | `it.impresasangalli.censimentomezzi` |
 | Android | 8.0 o superiore (`minSdk` 26, `targetSdk` 34) |
 | Linguaggio | Kotlin, solo componenti standard di Android (niente Jetpack Compose né librerie esterne) |
@@ -29,7 +29,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 - Esportazione Excel (`.xlsx`) e ZIP (Excel + cartella `foto/`), condivisione
 - "Azzera archivio"
 
-**ONLINE** – invio automatico a SharePoint (vedi sotto) e aggiornamenti dell'app
+**PORTALE** – collegamento al portale eDepositeria (vedi sotto) e aggiornamenti dell'app
 
 ### Data di uscita
 Per registrarla dopo il censimento:
@@ -111,7 +111,7 @@ L'app si aggiorna da sola scaricando le nuove versioni dalle
 
 **Sul telefono**
 - L'app controlla `version.json` dell'ultima Release all'apertura (al massimo ogni 30 minuti),
-  ogni 6 ore in background e con il pulsante *Controlla aggiornamenti* (scheda ONLINE).
+  ogni 6 ore in background e con il pulsante *Controlla aggiornamenti* (scheda PORTALE).
 - Scarica l'APK, ne verifica l'impronta SHA-256 e lo installa. Android accetta solo APK firmati
   con la stessa chiave dell'app già installata.
 - Non installa mai se nel modulo di censimento ci sono dati non salvati (targa, foto o data di uscita):
@@ -134,65 +134,43 @@ Le nuove versioni **devono** essere firmate con lo stesso `debug.keystore`
 - A ogni nuova versione aumentare `android:versionCode` e `android:versionName` in
   `app/src/main/AndroidManifest.xml`.
 
-## Invio a SharePoint (attivo dalla versione 1.4)
+## Collegamento al portale (dalla versione 1.5)
 
-Ogni censimento salvato viene inviato al sito
-[Censimento Mezzi](https://impresasangalli.sharepoint.com/sites/CensimentoMezzi) tramite Microsoft Graph.
-Il telefono resta l'archivio principale: senza rete i censimenti restano in coda e partono appena torna la connessione.
+Il **portale eDepositeria** ([repository privato `edepositeria`](https://github.com/Impresa-Sangalli/edepositeria),
+`https://edepositeria.impresasangalli.it`, rete aziendale) è l'archivio principale e l'anagrafica in tempo reale per l'ufficio.
+L'app è lo strumento operativo nel piazzale:
 
-- Sul telefono basta accedere con l'account Microsoft aziendale (scheda ONLINE): tenant, ID
-  applicazione e sito sono già nel codice (`Config.kt`). Non sono segreti: senza un account
-  autorizzato non danno accesso a nulla.
-- Gli operatori devono essere **Membri** del sito (permesso di modifica sulla raccolta Documenti).
-- Una data di uscita inserita o modificata **dopo** l'invio aggiorna la riga già presente nel file
-  Excel su SharePoint (la riga si individua dal nome della foto, unico per ogni censimento).
-- Eliminare un censimento sul telefono **non** lo cancella da SharePoint.
-- Al primo accesso l'app chiede se inviare anche i censimenti già presenti sul telefono.
+- registra **entrate** (targa, zona, foto, dati facoltativi: marca, modello, colore, tipo, pratica, ente, provvedimento, note),
+  **uscite**, **spostamenti di zona** e **correzioni**;
+- mostra l'**elenco aggiornato del piazzale**, compresi i mezzi registrati dagli altri telefoni o dall'ufficio, con le foto del portale;
+- funziona anche senza rete: ogni operazione va in una **coda** e parte appena il telefono è sul **Wi-Fi aziendale**
+  (sincronizzazione all'apertura, dopo ogni operazione e ogni 15 minuti);
+- **non cancella** nulla sul portale: l'eliminazione si fa dall'ufficio.
 
-Registrazione dell'app in Microsoft Entra ID: *Censimento Mezzi*, tenant singolo, client pubblico
-(nessun segreto), autorizzazioni delegate Microsoft Graph `Files.ReadWrite.All`, `User.Read`,
-`offline_access`, `openid`, `profile` con consenso amministratore.
+**Collegare un telefono** (una volta, a cura dell'amministratore): sul portale *Controlli › Telefoni › Nuovo telefono* →
+nell'app scheda **PORTALE › Collega al portale** (protetto da un PIN amministratore, scelto al primo uso) → inserire il codice
+(vale 24 ore, una sola volta). Al collegamento i censimenti già presenti sul telefono vengono inviati al portale.
+Un telefono perso si disattiva dal portale: il suo token smette subito di funzionare.
 
-<details>
-<summary>Dettagli tecnici</summary>
+Contratto delle API: `docs/api.md` nel repository del portale. Il certificato del portale (`*.impresasangalli.it`, GoDaddy)
+è verificato normalmente; la radice "GoDaddy TLS Root CA - R1" è inclusa nell'app (`res/raw`) per i telefoni Android
+meno recenti che non l'hanno ancora tra le radici di sistema (`res/xml/network_security_config.xml`).
 
-Struttura su SharePoint:
-```
-<Sito> › Documenti › Censimento Mezzi / foto / TARGA.jpg
-<Sito> › Documenti › Censimento Mezzi / Censimento_Mezzi.xlsx   (una riga per censimento)
-```
-Senza connessione i censimenti restano in coda e partono appena torna la rete (anche ad app chiusa).
-
-Configurazione una tantum a cura dell'IT (Microsoft Entra ID):
-1. portal.azure.com › Microsoft Entra ID › Registrazioni app › Nuova registrazione —
-   Nome: *Censimento Mezzi*, Tipi di account: solo questa directory (tenant singolo).
-2. Autenticazione › Aggiungi piattaforma › "Applicazioni per dispositivi mobili e desktop" —
-   URI di reindirizzamento personalizzato: `it.impresasangalli.censimentomezzi://auth`
-3. Autorizzazioni API › Microsoft Graph › Delegate:
-   `Files.ReadWrite.All`, `User.Read`, `offline_access`, `openid`, `profile` › "Concedi consenso amministratore".
-4. Comunicare: ID applicazione (client), ID directory (tenant), indirizzo del sito SharePoint.
-   Gli operatori devono avere permesso di modifica sulla raccolta Documenti del sito.
-
-I valori predefiniti sono in `Config.kt` (`DEFAULT_…`); dalla scheda ONLINE ›
-Configurazione (amministratore) si possono sovrascrivere su un singolo telefono.
-</details>
-
+L'invio a SharePoint delle versioni 1.1–1.4 è stato rimosso.
 ## Struttura del codice
 
 ```
 app/src/main/AndroidManifest.xml
 app/src/main/res/                    icone e stringhe
 app/src/main/java/it/impresasangalli/censimentomezzi/
-   MainActivity.kt   interfaccia (Censimento / Elenco / Esporta / Online)
+   MainActivity.kt   interfaccia (Censimento / Elenco / Esporta / Portale)
    Db.kt             archivio locale SQLite
    PhotoStore.kt     salvataggio foto in Pictures/CensimentoMezzi
    Exporter.kt       esportazione Excel e ZIP in Download/CensimentoMezzi
    XlsxWriter.kt     generatore .xlsx senza librerie esterne
    FilesProvider.kt  scambio file con l'app fotocamera e condivisione (Android 8-9)
-   Config.kt         configurazione SharePoint e sessione (token cifrati nel Keystore)
-   Auth.kt           accesso Microsoft 365 (OAuth 2.0 + PKCE)
-   Graph.kt          client Microsoft Graph: foto in SharePoint, righe nel file Excel
-   SyncEngine.kt     coda di invio automatica (JobScheduler)
+   Server.kt         collegamento al portale: indirizzo, token cifrato, PIN, chiamate HTTP
+   SyncEngine.kt     coda di invio e sincronizzazione del piazzale (JobScheduler)
    Updater.kt        aggiornamento automatico dalle Release GitHub
 .github/workflows/release.yml   compilazione e pubblicazione delle Release
 build.ps1            compilazione su Windows

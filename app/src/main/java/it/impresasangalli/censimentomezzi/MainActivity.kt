@@ -106,23 +106,29 @@ class MainActivity : Activity() {
     private lateinit var listAdapter: CensAdapter
     private lateinit var tvSummary: TextView
     private lateinit var tvSync: TextView
-    private lateinit var tvOnlineStatus: TextView
-    private lateinit var btnLogin: Button
-    private lateinit var btnSyncNow: Button
-    private lateinit var btnRetry: Button
-    private lateinit var cfgBox: LinearLayout
-    private lateinit var btnCfgToggle: Button
-    private lateinit var etTenant: EditText
-    private lateinit var etClient: EditText
-    private lateinit var etSite: EditText
-    private lateinit var etFolder: EditText
-    private lateinit var etExcel: EditText
+    private lateinit var tvServer: TextView
+    private lateinit var btnSyncOra: Button
+    private lateinit var btnFallite: Button
+    private lateinit var btnCollega: Button
+    private lateinit var btnIndirizzo: Button
+    // dati facoltativi del modulo di censimento
+    private lateinit var btnAltri: Button
+    private lateinit var altriBox: LinearLayout
+    private lateinit var etMarca: EditText
+    private lateinit var etModello: EditText
+    private lateinit var etColore: EditText
+    private lateinit var spTipo: android.widget.Spinner
+    private lateinit var etPratica: EditText
+    private lateinit var etEnte: EditText
+    private lateinit var etProvv: android.widget.AutoCompleteTextView
+    private lateinit var etNote: EditText
     private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val syncListener: () -> Unit = {
         uiHandler.post {
             refreshSyncStatus()
-            if (tab == 1) refreshList()
-            if (tab == 3) refreshOnline()
+            if (tab == 3) refreshServer()
+            // al termine della sincronizzazione l'elenco mostra i dati ricevuti dal portale
+            if (!SyncEngine.running) { refreshCounts(); if (tab == 1) refreshList(); if (tab == 2) refreshSummary(); if (tab == 0) checkDuplicate() }
         }
     }
     private val zoneCountViews = HashMap<String, TextView>()
@@ -158,7 +164,6 @@ class MainActivity : Activity() {
         updateFilterButtons()
         showTab(tab)
 
-        handleAuthRedirect(intent)
         Updater.justUpdated(this)?.let { toast("App aggiornata alla versione $it") }
 
         // Android 8-9: permesso di scrittura per creare Pictures/CensimentoMezzi
@@ -170,17 +175,11 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleAuthRedirect(intent)
-    }
-
     override fun onResume() {
         super.onResume()
         SyncEngine.listener = syncListener
         refreshSyncStatus()
-        if (tab == 3) refreshOnline()
+        if (tab == 3) refreshServer()
         SyncJobService.schedule(this)
         Updater.foreground = true
         Updater.listener = updateListener
@@ -329,7 +328,7 @@ class MainActivity : Activity() {
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
         tabs.setBackgroundColor(GREEN_DARK)
-        listOf("CENSIMENTO", "ELENCO", "ESPORTA", "ONLINE").forEachIndexed { i, label ->
+        listOf("CENSIMENTO", "ELENCO", "ESPORTA", "PORTALE").forEachIndexed { i, label ->
             val b = Button(this)
             b.text = label
             b.textSize = 12.5f
@@ -354,7 +353,7 @@ class MainActivity : Activity() {
         screens.add(buildCensimento())
         screens.add(buildElenco())
         screens.add(buildEsporta())
-        screens.add(buildOnline())
+        screens.add(buildServer())
         screens.forEach { content.addView(it, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         root.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         return root
@@ -371,7 +370,7 @@ class MainActivity : Activity() {
         refreshCounts()
         if (i == 1) refreshList()
         if (i == 2) refreshSummary()
-        if (i == 3) { refreshOnline(); refreshUpdate() }
+        if (i == 3) { refreshServer(); refreshUpdate() }
     }
 
     private fun refreshCounts() {
@@ -418,11 +417,13 @@ class MainActivity : Activity() {
 
         // 2. Zona
         col.addView(section("2. ZONA DI PARCHEGGIO *"))
-        for (r in 0 until 3) {
+        // zone dal portale (ultime ricevute), tre per riga
+        for (riga in ServerConfig(this).zone.chunked(3)) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
             for (c in 0 until 3) {
-                val z = ZONE[r * 3 + c]
+                val z = riga.getOrNull(c)
+                if (z == null) { row.addView(View(this), LinearLayout.LayoutParams(0, dp(62), 1f)); continue }
                 val b = Button(this)
                 b.text = z
                 b.textSize = 24f
@@ -454,8 +455,30 @@ class MainActivity : Activity() {
         btnFoto.setOnClickListener { hideKeyboard(); onScatta() }
         col.addView(btnFoto)
 
-        // 4. Data di uscita (facoltativa)
-        col.addView(section("4. DATA DI USCITA (facoltativa)"))
+        // 4. Altri dati (facoltativi)
+        col.addView(section("4. ALTRI DATI (facoltativi)"))
+        btnAltri = button("MOSTRA ALTRI DATI ▸", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 50, size = 15f)
+        btnAltri.setOnClickListener {
+            val vis = altriBox.visibility != View.VISIBLE
+            altriBox.visibility = if (vis) View.VISIBLE else View.GONE
+            btnAltri.text = if (vis) "NASCONDI ALTRI DATI ▾" else "MOSTRA ALTRI DATI ▸"
+        }
+        col.addView(btnAltri)
+        altriBox = LinearLayout(this)
+        altriBox.orientation = LinearLayout.VERTICAL
+        altriBox.visibility = View.GONE
+        etMarca = campo("Marca", "es. Fiat", altriBox)
+        etModello = campo("Modello", "es. Panda", altriBox)
+        etColore = campo("Colore", "es. Bianco", altriBox)
+        spTipo = spinnerTipi(null, altriBox)
+        etPratica = campo("N. pratica / verbale", "", altriBox)
+        etEnte = campo("Ente", "es. Prefettura di Milano", altriBox)
+        etProvv = campoProvvedimento(null, altriBox)
+        etNote = campo("Note", "danni, chiavi, documenti a bordo…", altriBox, multilinea = true)
+        col.addView(altriBox)
+
+        // 5. Data di uscita (facoltativa)
+        col.addView(section("5. DATA DI USCITA (facoltativa)"))
         col.addView(text("Da compilare quando il mezzo lascia il piazzale. Si può inserire anche in seguito dalla scheda ELENCO.", 14f, GREY).apply { setPadding(0, dp(4), 0, 0) })
         val ur = LinearLayout(this)
         ur.orientation = LinearLayout.HORIZONTAL
@@ -680,16 +703,27 @@ class MainActivity : Activity() {
         withStorage { doSave(targa, zona!!, f!!, uscita) }
     }
 
+    private fun testoCampo(e: EditText): String? = e.text.toString().trim().ifEmpty { null }
+    private fun tipoScelto(sp: android.widget.Spinner): Pair<Int, String>? = ServerConfig(this).tipi().getOrNull(sp.selectedItemPosition - 1)
+    private fun altriCompilati(): Boolean = ::etMarca.isInitialized &&
+        listOf(etMarca, etModello, etColore, etPratica, etEnte, etProvv, etNote).any { it.text.isNotBlank() } || (::spTipo.isInitialized && spTipo.selectedItemPosition > 0)
+
     private fun doSave(targa: String, z: String, f: File, uscita: LocalDate?) {
         saving = true
         btnSalva.isEnabled = false
         btnSalva.text = "SALVATAGGIO…"
+        val tipo = tipoScelto(spTipo)
+        val base = Censimento(0, targa, z, "", "", "", "", 0, dataUscita = uscita?.format(D_FMT), uuid = java.util.UUID.randomUUID().toString(),
+            marca = testoCampo(etMarca), modello = testoCampo(etModello), colore = testoCampo(etColore), tipoId = tipo?.first, tipoNome = tipo?.second,
+            pratica = testoCampo(etPratica), ente = testoCampo(etEnte), provvedimento = testoCampo(etProvv), note = testoCampo(etNote))
         Thread {
             try {
                 val now = LocalDateTime.now()
                 val saved = PhotoStore.save(this, db, targa, f)
-                db.insert(Censimento(0, targa, z, now.format(D_FMT), now.format(T_FMT), saved.name, saved.uri, System.currentTimeMillis(),
-                    dataUscita = uscita?.format(D_FMT)))
+                db.insert(base.copy(data = now.format(D_FMT), ora = now.format(T_FMT), nomeFile = saved.name, uri = saved.uri, ts = System.currentTimeMillis()))
+                // invio al portale: entrata e foto restano in coda finché il portale non è raggiungibile
+                db.accoda(TipoOp.INGRESSO, base.uuid)
+                db.accoda(TipoOp.FOTO, base.uuid, org.json.JSONObject().put("foto_uuid", java.util.UUID.randomUUID().toString()))
                 f.delete()
                 runOnUiThread {
                     saving = false
@@ -699,6 +733,8 @@ class MainActivity : Activity() {
                     dataUscita = null
                     updateUscitaButton()
                     etTarga.setText("")
+                    listOf(etMarca, etModello, etColore, etPratica, etEnte, etProvv, etNote).forEach { it.setText("") }
+                    spTipo.setSelection(0)
                     updatePreview()
                     refreshCounts()
                     SyncJobService.schedule(this)
@@ -743,22 +779,12 @@ class MainActivity : Activity() {
             z.setPadding(dp(10), dp(3), dp(10), dp(3))
             top.addView(z)
             row.addView(top)
-            row.addView(text("${c.data}  ${c.ora}   ·   ${c.remoteName ?: c.nomeFile}", 14f, GREY))
+            val veicolo = listOfNotNull(c.marca, c.modello, c.colore).joinToString(" ")
+            row.addView(text("${c.data}  ${c.ora.take(5)}" + (if (veicolo.isNotEmpty()) "   ·   $veicolo" else ""), 14f, GREY))
             if (c.dataUscita != null) row.addView(text("↗ Uscito il ${c.dataUscita}", 14f, BLUE, true))
             else row.addView(text("● Nel piazzale", 14f, GREEN, true))
-            if (Config(this@MainActivity).ready()) {
-                val (label, color) = when (c.syncState) {
-                    SyncState.SENT -> when {
-                        c.uscitaDirty -> "⏳ Data di uscita da aggiornare su SharePoint" to ORANGE
-                        c.syncError != null -> "✓ Inviato a SharePoint · ⚠ ${c.syncError}" to ORANGE
-                        else -> "✓ Inviato a SharePoint" to GREEN
-                    }
-                    SyncState.FAILED -> "⚠ Non inviato: ${c.syncError ?: "errore"}" to RED
-                    SyncState.EXCLUDED -> "Non inviato (registrato prima dell'attivazione)" to GREY
-                    else -> "⏳ In attesa di invio" to ORANGE
-                }
-                row.addView(text(label, 13f, color, true))
-            }
+            val stato = statoInvio(c)
+            if (stato != null) row.addView(text(stato.first, 13f, stato.second, true))
             return row
         }
     }
@@ -842,62 +868,150 @@ class MainActivity : Activity() {
         else "Trovati: ${list.size} su ${all.size}"
     }
 
-    private fun showDetail(c: Censimento) {
+    /** Stato dell'invio al portale di un censimento: testo e colore, oppure null se non c'è nulla da segnalare. */
+    private fun statoInvio(c: Censimento): Pair<String, Int>? {
+        val err = db.erroreDi(c.uuid)
+        return when {
+            db.haOperazioni(c.uuid) && db.operazioniFallite().any { it.uuid == c.uuid } -> "⚠ Rifiutato dal portale: ${err ?: "errore"}" to RED
+            db.haOperazioni(c.uuid) -> "⏳ Da inviare al portale" to ORANGE
+            !c.sulServer -> "Solo su questo telefono" to GREY
+            else -> null
+        }
+    }
+
+    private fun showDetail(c0: Censimento) {
+        val c = db.get(c0.id) ?: c0
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.setPadding(dp(20), dp(8), dp(20), 0)
-        var info = "Zona ${c.zona}\nCensito il ${c.data} ore ${c.ora}\nFile: ${c.nomeFile}\n" +
-            (if (c.dataUscita != null) "Data di uscita: ${c.dataUscita}" else "Data di uscita: non inserita (mezzo nel piazzale)")
-        if (c.remoteName != null && c.remoteName != c.nomeFile) info += "\nNome su SharePoint: ${c.remoteName}"
-        c.syncError?.let { info += "\nNota invio: $it" }
-        box.addView(text(info, 16f, Color.BLACK))
+        val righe = mutableListOf("Zona ${c.zona}", "Entrato il ${c.data} ore ${c.ora.take(5)}",
+            if (c.dataUscita != null) "Uscito il ${c.dataUscita}" else "Nel piazzale (nessuna data di uscita)")
+        listOfNotNull(c.marca, c.modello, c.colore).joinToString(" ").takeIf { it.isNotEmpty() }?.let { righe.add("Veicolo: $it") }
+        c.tipoNome?.let { righe.add("Tipo: $it") }
+        c.pratica?.let { righe.add("Pratica / verbale: $it") }
+        c.ente?.let { righe.add("Ente: $it") }
+        c.provvedimento?.let { righe.add("Provvedimento: $it") }
+        c.note?.let { righe.add("Note: $it") }
+        statoInvio(c)?.let { righe.add(it.first) }
+        box.addView(text(righe.joinToString("\n"), 16f, Color.BLACK))
         val iv = ImageView(this)
         iv.adjustViewBounds = true
         iv.scaleType = ImageView.ScaleType.FIT_CENTER
-        val bmp = loadBitmap({ PhotoStore.open(this, c.uri) }, 1280)
-        if (bmp != null) {
-            iv.setImageBitmap(bmp)
-            box.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)).apply { topMargin = dp(12) })
-        } else {
-            box.addView(text("Fotografia non trovata sul telefono (forse eliminata dalla galleria).", 14f, RED))
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)).apply { topMargin = dp(12) }
+        val locale = if (c.uri.isNotEmpty()) loadBitmap({ PhotoStore.open(this, c.uri) }, 1280) else null
+        when {
+            locale != null -> { iv.setImageBitmap(locale); box.addView(iv, lp) }
+            c.fotoIds.isNotEmpty() && ServerConfig(this).collegato() -> {
+                val attesa = text("Caricamento della foto dal portale…", 14f, GREY)
+                box.addView(attesa); box.addView(iv, lp)
+                Thread {
+                    val bmp = try { val f = Server(this).scaricaFoto(c.fotoIds.first(), 1024); loadBitmap({ f.inputStream() }, 1280) } catch (e: Exception) { null }
+                    runOnUiThread { if (bmp != null) { iv.setImageBitmap(bmp); attesa.visibility = View.GONE } else attesa.text = "Foto non disponibile (portale non raggiungibile)" }
+                }.start()
+            }
+            c.fotoIds.isNotEmpty() -> box.addView(text("La foto è sul portale: collegare il telefono per vederla.", 14f, GREY))
+            else -> box.addView(text(if (c.uri.isNotEmpty()) "Fotografia non trovata sul telefono (forse eliminata dalla galleria)." else "Nessuna foto.", 14f, RED))
         }
         AlertDialog.Builder(this)
             .setTitle(c.targa)
-            .setView(box)
+            .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("CHIUDI", null)
-            .setNeutralButton("ELIMINA") { _, _ -> confirmDelete(c) }
+            .setNeutralButton("ALTRO…") { _, _ -> altreAzioni(c) }
             .setNegativeButton(if (c.dataUscita == null) "DATA USCITA" else "MODIFICA USCITA") { _, _ -> editUscita(c) }
             .show()
+    }
+
+    private fun altreAzioni(c: Censimento) {
+        val voci = mutableListOf("Sposta in un'altra zona", "Correggi i dati")
+        val eliminabile = !c.sulServer
+        if (eliminabile) voci.add("Elimina dal telefono")
+        AlertDialog.Builder(this).setTitle(c.targa).setItems(voci.toTypedArray()) { _, i ->
+            when (i) { 0 -> spostaZona(c); 1 -> correggi(c); 2 -> confirmDelete(c) }
+        }.setNegativeButton("ANNULLA", null).show()
+    }
+
+    private fun spostaZona(c: Censimento) {
+        val zone = ServerConfig(this).zone
+        AlertDialog.Builder(this).setTitle("${c.targa}: nuova zona").setSingleChoiceItems(zone.toTypedArray(), zone.indexOf(c.zona)) { d, i ->
+            d.dismiss()
+            val z = zone[i]
+            if (z == c.zona) return@setSingleChoiceItems
+            val v = android.content.ContentValues(); v.put("zona", z)
+            db.aggiorna(c.id, v)
+            db.accoda(TipoOp.ZONA, c.uuid, org.json.JSONObject().put("zona", z))
+            datiCambiati(); toast("${c.targa} spostato in zona $z")
+        }.setNegativeButton("ANNULLA", null).show()
+    }
+
+    private fun correggi(c: Censimento) {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(4), dp(20), dp(8))
+        box.addView(text("Targa", 13f, GREY, true).apply { setPadding(0, dp(10), 0, dp(4)) })
+        val eT = plateEdit("Targa", 20f); eT.setText(c.targa); box.addView(eT)
+        val eMa = campo("Marca", "", box, c.marca); val eMo = campo("Modello", "", box, c.modello); val eCo = campo("Colore", "", box, c.colore)
+        val sT = spinnerTipi(c.tipoId, box)
+        val ePr = campo("N. pratica / verbale", "", box, c.pratica); val eEn = campo("Ente", "", box, c.ente)
+        val ePv = campoProvvedimento(c.provvedimento, box); val eNo = campo("Note", "", box, c.note, multilinea = true)
+        AlertDialog.Builder(this).setTitle("Correggi ${c.targa}").setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("SALVA") { _, _ ->
+                val nuovaTarga = eT.text.toString().trim().uppercase()
+                if (nuovaTarga.length < 3) { alert("Targa non valida", "La targa deve avere almeno 3 caratteri."); return@setPositiveButton }
+                val tipo = tipoScelto(sT)
+                val v = android.content.ContentValues(); val j = org.json.JSONObject()
+                fun cambia(col: String, chiave: String, vecchio: Any?, nuovo: Any?) {
+                    if (vecchio == nuovo) return
+                    if (nuovo == null) v.putNull(col) else v.put(col, nuovo.toString())
+                    j.put(chiave, nuovo ?: org.json.JSONObject.NULL)
+                }
+                cambia("targa", "targa", c.targa, nuovaTarga)
+                cambia("marca", "marca", c.marca, testoCampo(eMa)); cambia("modello", "modello", c.modello, testoCampo(eMo))
+                cambia("colore", "colore", c.colore, testoCampo(eCo))
+                cambia("pratica", "pratica_numero", c.pratica, testoCampo(ePr)); cambia("ente", "ente", c.ente, testoCampo(eEn))
+                cambia("provvedimento", "provvedimento", c.provvedimento, testoCampo(ePv)); cambia("note", "note", c.note, testoCampo(eNo))
+                if (c.tipoId != tipo?.first) {
+                    if (tipo == null) { v.putNull("tipo_id"); v.putNull("tipo_nome") } else { v.put("tipo_id", tipo.first); v.put("tipo_nome", tipo.second) }
+                    j.put("tipo_veicolo_id", tipo?.first ?: org.json.JSONObject.NULL)
+                }
+                if (j.length() == 0) { toast("Nessuna modifica"); return@setPositiveButton }
+                db.aggiorna(c.id, v)
+                db.accoda(TipoOp.CORREZIONE, c.uuid, j)
+                datiCambiati(); toast("Dati di ${nuovaTarga} corretti")
+            }.setNegativeButton("ANNULLA", null).show()
+    }
+
+    /** Dopo una modifica locale: aggiorna le viste e avvia l'invio al portale. */
+    private fun datiCambiati() {
+        refreshList(); refreshSummary(); refreshCounts(); checkDuplicate()
+        SyncJobService.schedule(this)
+        refreshSyncStatus()
     }
 
     private fun editUscita(c: Censimento) {
         val min = try { LocalDate.parse(c.data, D_FMT) } catch (e: Exception) { LocalDate.now() }
         val current = c.dataUscita?.let { try { LocalDate.parse(it, D_FMT) } catch (e: Exception) { null } }
         val onClear: (() -> Unit)? = if (c.dataUscita == null) null else ({
-            db.setUscita(c.id, null); uscitaChanged(); toast("Data di uscita rimossa: ${c.targa} risulta nel piazzale")
+            db.setUscita(c.id, null)
+            db.accoda(TipoOp.USCITA, c.uuid, org.json.JSONObject().put("data_uscita", org.json.JSONObject.NULL))
+            datiCambiati(); toast("Data di uscita rimossa: ${c.targa} risulta nel piazzale")
         })
         pickUscita(current, min, onClear) { d ->
             db.setUscita(c.id, d.format(D_FMT))
-            uscitaChanged()
+            db.accoda(TipoOp.USCITA, c.uuid, org.json.JSONObject().put("data_uscita", d.toString()))
+            datiCambiati()
             toast("${c.targa}: uscita il ${d.format(D_FMT)}")
         }
-    }
-
-    /** Dopo una modifica della data di uscita: aggiorna le viste e, se già inviato, SharePoint. */
-    private fun uscitaChanged() {
-        refreshList(); refreshSummary(); checkDuplicate()
-        SyncJobService.schedule(this)
-        refreshSyncStatus()
     }
 
     private fun confirmDelete(c: Censimento) {
         AlertDialog.Builder(this)
             .setTitle("Eliminare il censimento?")
-            .setMessage("Targa ${c.targa} – zona ${c.zona} – ${c.data} ${c.ora}\n\nVerranno eliminati il censimento e la fotografia ${c.nomeFile} dal telefono." +
-                if (c.syncState == SyncState.SENT || c.syncState == SyncState.PHOTO_SENT) "\n\nI dati già inviati a SharePoint NON vengono modificati." else "")
+            .setMessage("Targa ${c.targa} – zona ${c.zona} – ${c.data} ${c.ora}\n\nIl censimento non è ancora sul portale: verranno eliminati dal telefono il censimento" +
+                (if (c.nomeFile.isNotEmpty()) " e la fotografia ${c.nomeFile}" else "") + ", e non verrà inviato.")
             .setPositiveButton("ELIMINA") { _, _ ->
-                PhotoStore.delete(this, c.uri)
+                if (c.uri.isNotEmpty()) PhotoStore.delete(this, c.uri)
                 db.delete(c.id)
+                refreshSyncStatus()
                 refreshList()
                 refreshCounts()
                 toast("Censimento eliminato")
@@ -922,11 +1036,12 @@ class MainActivity : Activity() {
         tvSummary = text("", 16f, Color.BLACK)
         sum.addView(tvSummary)
         sum.addView(text("Mezzi nel piazzale per zona", 14f, GREY, true).apply { setPadding(0, dp(12), 0, dp(4)) })
-        for (r in 0 until 3) {
+        for (riga in ServerConfig(this).zone.chunked(3)) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
             for (c in 0 until 3) {
-                val z = ZONE[r * 3 + c]
+                val z = riga.getOrNull(c)
+                if (z == null) { row.addView(View(this), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)); continue }
                 val cell = text("", 16f, GREEN_DARK, true)
                 cell.gravity = Gravity.CENTER
                 cell.background = shape(GREEN_LIGHT, 8)
@@ -970,7 +1085,7 @@ class MainActivity : Activity() {
         (clear.layoutParams as LinearLayout.LayoutParams).topMargin = dp(24)
         clear.setOnClickListener { confirmClear() }
         col.addView(clear)
-        col.addView(text("Svuota l'elenco dei censimenti nell'app per iniziare un nuovo censimento. Le fotografie restano nella cartella del telefono. Esportare prima il censimento.", 13f, GREY).apply { setPadding(dp(4), dp(6), dp(4), 0) })
+        col.addView(text("Svuota la copia del piazzale su questo telefono. Con il telefono collegato i dati restano sul portale e vengono riscaricati alla sincronizzazione successiva. Le fotografie restano nella cartella del telefono.", 13f, GREY).apply { setPadding(dp(4), dp(6), dp(4), 0) })
         return scroll
     }
 
@@ -987,7 +1102,7 @@ class MainActivity : Activity() {
                 "Primo: ${first.data} ${first.ora.take(5)}\nUltimo: ${last.data} ${last.ora.take(5)}"
         }
         val counts = all.filter { it.dataUscita == null }.groupingBy { it.zona }.eachCount()
-        ZONE.forEach { z -> zoneCountViews[z]?.text = "$z: ${counts[z] ?: 0}" }
+        zoneCountViews.forEach { (z, v) -> v.text = "$z: ${counts[z] ?: 0}" }
     }
 
     private fun startExport(zip: Boolean) {
@@ -1060,18 +1175,18 @@ class MainActivity : Activity() {
     private fun confirmClear() {
         val n = db.count()
         if (n == 0) { toast("L'archivio è già vuoto"); return }
-        val sc = db.syncCounts()
-        val unsent = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0) + (sc[SyncState.FAILED] ?: 0)
-        val warn = if (Config(this).ready() && unsent > 0) "\n\nATTENZIONE: $unsent censimenti NON sono ancora stati inviati a SharePoint e andrebbero persi." else ""
+        val nonInviati = db.allNewestFirst().count { !it.sulServer }
+        val warn = if (nonInviati > 0) "\n\nATTENZIONE: $nonInviati censimenti NON sono ancora sul portale e andrebbero persi." else ""
         AlertDialog.Builder(this)
             .setTitle("Azzerare l'archivio?")
-            .setMessage("Verranno eliminati dall'elenco $n censimenti.\n\nLe fotografie NON vengono cancellate e restano in ${PhotoStore.folderDescription()}.$warn\n\nHai già esportato il censimento completo?")
+            .setMessage("Verranno eliminati dal telefono $n censimenti. Quelli già sul portale restano sul portale.\n\nLe fotografie NON vengono cancellate e restano in ${PhotoStore.folderDescription()}.$warn\n\nHai già esportato il censimento completo?")
             .setPositiveButton("AZZERA") { _, _ ->
                 AlertDialog.Builder(this)
                     .setTitle("Conferma definitiva")
                     .setMessage("L'operazione non può essere annullata. Procedere?")
                     .setPositiveButton("SÌ, AZZERA") { _, _ ->
-                        db.clear(); refreshSummary(); refreshCounts(); refreshSyncStatus(); toast("Archivio azzerato")
+                        db.clear(); ServerConfig(this).cursore = null
+                        refreshSummary(); refreshCounts(); refreshSyncStatus(); toast("Archivio azzerato")
                     }
                     .setNegativeButton("ANNULLA", null)
                     .show()
@@ -1080,7 +1195,7 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ------------------------------------------------------------------ sezione ONLINE (SharePoint)
+    // ------------------------------------------------------------------ sezione PORTALE (collegamento al portale eDepositeria)
 
     private fun timeLabel(ms: Long): String {
         if (ms <= 0) return "mai"
@@ -1092,18 +1207,18 @@ class MainActivity : Activity() {
     /** Barra colorata sotto le schede, visibile in tutte le sezioni. */
     private fun refreshSyncStatus() {
         if (!::tvSync.isInitialized) return
-        val cfg = Config(this)
-        val sc = db.syncCounts()
-        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0) + db.uscitaUpdatesPending()
-        val failed = sc[SyncState.FAILED] ?: 0
+        val cfg = ServerConfig(this)
+        val coda = db.inCoda()
+        val ko = db.fallite()
+        val err = cfg.ultimoErrore
         val (msg, color) = when {
-            !cfg.ready() -> "Invio online non configurato · tocca qui" to 0xFF757575.toInt()
-            !Auth.signedIn(this) -> (if (cfg.authExpired) "⚠ Accesso Microsoft scaduto · tocca per accedere"
-                else "⚠ Accedere con l'account Microsoft · tocca qui") + (if (pending > 0) " ($pending in attesa)" else "") to RED
-            SyncEngine.running && pending > 0 -> "⟳ Invio a SharePoint in corso… ($pending da inviare)" to 0xFF1565C0.toInt()
-            pending > 0 -> "⏳ $pending in attesa di invio" + (cfg.lastError?.let { " · $it" } ?: "") to ORANGE
-            failed > 0 -> "⚠ $failed censimenti non inviati · tocca per dettagli" to RED
-            else -> "✓ Tutto inviato a SharePoint · ultimo invio ${timeLabel(cfg.lastOk)}" to GREEN
+            !cfg.collegato() -> (err ?: "Telefono non collegato al portale · tocca qui") + (if (coda > 0) " ($coda in attesa)" else "") to (if (err != null) RED else 0xFF757575.toInt())
+            SyncEngine.running -> "⟳ Sincronizzazione con il portale…" + (if (coda > 0) " ($coda da inviare)" else "") to BLUE
+            ko > 0 -> "⚠ $ko operazioni rifiutate dal portale · tocca per dettagli" to RED
+            coda > 0 -> "⏳ $coda in attesa di invio" + (err?.let { " · $it" } ?: "") to ORANGE
+            err != null -> "⚠ $err" to ORANGE
+            cfg.ultimaSync == 0L -> "Collegato al portale · prima sincronizzazione in corso" to BLUE
+            else -> "✓ Aggiornato con il portale · ${timeLabel(cfg.ultimaSync)}" to GREEN
         }
         tvSync.text = msg
         tvSync.setBackgroundColor(color)
@@ -1111,79 +1226,88 @@ class MainActivity : Activity() {
         tvSync.ellipsize = android.text.TextUtils.TruncateAt.END
     }
 
-    private fun field(label: String, hint: String, parent: LinearLayout): EditText {
-        parent.addView(text(label, 13f, GREY, true).apply { setPadding(0, dp(10), 0, dp(4)) })
-        val e = EditText(this)
+    /* ---------- campi dei moduli ---------- */
+    private fun stileCampo(e: EditText, hint: String) {
         e.hint = hint
         e.textSize = 15f
-        e.setSingleLine(true)
-        e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_URI
         e.setTextColor(Color.BLACK)
         e.setHintTextColor(0xFF9E9E9E.toInt())
         e.background = shape(Color.WHITE, 8, 0xFFBDBDBD.toInt(), 1)
         e.setPadding(dp(10), dp(8), dp(10), dp(8))
+    }
+
+    private fun etichetta(label: String, parent: LinearLayout) =
+        parent.addView(text(label, 13f, GREY, true).apply { setPadding(0, dp(10), 0, dp(4)) })
+
+    private fun campo(label: String, hint: String, parent: LinearLayout, valore: String? = null, multilinea: Boolean = false): EditText {
+        etichetta(label, parent)
+        val e = EditText(this)
+        stileCampo(e, hint)
+        if (multilinea) { e.minLines = 2; e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES }
+        else { e.setSingleLine(true); e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS }
+        valore?.let { e.setText(it) }
         parent.addView(e)
         return e
     }
 
-    private fun buildOnline(): View {
+    private fun campoProvvedimento(valore: String?, parent: LinearLayout): android.widget.AutoCompleteTextView {
+        etichetta("Provvedimento", parent)
+        val e = android.widget.AutoCompleteTextView(this)
+        stileCampo(e, "es. Sequestro")
+        e.setSingleLine(true)
+        e.threshold = 0
+        e.setAdapter(android.widget.ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, ServerConfig(this).provvedimenti))
+        e.setOnFocusChangeListener { _, f -> if (f) e.showDropDown() }
+        valore?.let { e.setText(it) }
+        parent.addView(e)
+        return e
+    }
+
+    private fun spinnerTipi(scelto: Int?, parent: LinearLayout): android.widget.Spinner {
+        etichetta("Tipo di veicolo", parent)
+        val tipi = ServerConfig(this).tipi()
+        val sp = android.widget.Spinner(this)
+        sp.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("—") + tipi.map { it.second })
+        sp.background = shape(Color.WHITE, 8, 0xFFBDBDBD.toInt(), 1)
+        sp.setSelection(tipi.indexOfFirst { it.first == scelto } + 1)
+        parent.addView(sp, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        return sp
+    }
+
+    /* ---------- scheda PORTALE ---------- */
+    private fun buildServer(): View {
         val scroll = ScrollView(this)
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(dp(16), dp(16), dp(16), dp(24))
         scroll.addView(col)
 
-        col.addView(text("INVIO AUTOMATICO A SHAREPOINT", 21f, GREEN_DARK, true))
-        col.addView(text("Ogni censimento salvato viene inviato automaticamente: la foto nella cartella \"foto\" e una nuova riga nel file Excel condiviso. Senza connessione i censimenti restano in coda e partono appena torna la rete.", 14f, GREY).apply { setPadding(0, dp(6), 0, 0) })
+        col.addView(text("PORTALE eDEPOSITERIA", 21f, GREEN_DARK, true))
+        col.addView(text("Il telefono invia entrate, uscite e modifiche al portale eDepositeria dell'ufficio e riceve l'elenco aggiornato del piazzale, " +
+            "compresi i mezzi registrati dagli altri telefoni. Funziona sul Wi-Fi aziendale: fuori rete le operazioni restano in coda e partono appena possibile.", 14f, GREY)
+            .apply { setPadding(0, dp(6), 0, 0) })
 
         val st = card()
-        tvOnlineStatus = text("", 16f, Color.BLACK)
-        st.addView(tvOnlineStatus)
-        btnLogin = button("ACCEDI CON ACCOUNT MICROSOFT", GREEN, height = 60)
-        btnLogin.setOnClickListener { onLoginButton() }
-        st.addView(btnLogin)
-        btnSyncNow = button("INVIA ORA", GREEN_DARK, height = 56, size = 16f)
-        btnSyncNow.setOnClickListener {
-            Config(this).lastError = null
-            SyncJobService.schedule(this)
-            toast("Invio avviato")
-            refreshOnline()
-        }
-        st.addView(btnSyncNow)
-        btnRetry = button("RIPROVA I CENSIMENTI IN ERRORE", Color.WHITE, RED, RED, height = 52, size = 15f)
-        btnRetry.setOnClickListener {
-            db.retryFailed(); SyncJobService.schedule(this); refreshOnline(); refreshSyncStatus()
-        }
-        st.addView(btnRetry)
+        tvServer = text("", 16f, Color.BLACK)
+        st.addView(tvServer)
+        btnSyncOra = button("SINCRONIZZA ORA", GREEN, height = 60)
+        btnSyncOra.setOnClickListener { sincronizzaOra() }
+        st.addView(btnSyncOra)
+        btnFallite = button("OPERAZIONI RIFIUTATE DAL PORTALE", Color.WHITE, RED, RED, height = 52, size = 15f)
+        btnFallite.setOnClickListener { mostraFallite() }
+        st.addView(btnFallite)
         col.addView(st)
 
-        btnCfgToggle = button("CONFIGURAZIONE (AMMINISTRATORE) ▸", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 50, size = 14f)
-        (btnCfgToggle.layoutParams as LinearLayout.LayoutParams).topMargin = dp(20)
-        btnCfgToggle.setOnClickListener { toggleConfig() }
-        col.addView(btnCfgToggle)
-
-        cfgBox = card()
-        cfgBox.visibility = View.GONE
-        cfgBox.addView(text("Dati forniti dall'ufficio IT dopo la registrazione dell'app in Microsoft Entra ID.", 13f, GREY))
-        val redirect = text("URI di reindirizzamento da registrare:\n${Auth.REDIRECT_URI}", 13f, GREEN_DARK, true)
-        redirect.setPadding(dp(10), dp(8), dp(10), dp(8))
-        redirect.background = shape(GREEN_LIGHT, 8)
-        redirect.setTextIsSelectable(true)
-        redirect.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
-        cfgBox.addView(redirect)
-        etTenant = field("ID tenant o dominio", "es. impresasangalli.it", cfgBox)
-        etClient = field("ID applicazione (client)", "es. 1a2b3c4d-....", cfgBox)
-        etSite = field("Indirizzo del sito SharePoint", "https://azienda.sharepoint.com/sites/NomeSito", cfgBox)
-        etFolder = field("Cartella nella raccolta Documenti", Config.DEFAULT_FOLDER, cfgBox)
-        etExcel = field("Nome del file Excel", Config.DEFAULT_EXCEL, cfgBox)
-        val bSave = button("SALVA CONFIGURAZIONE", GREEN, height = 56, size = 16f)
-        (bSave.layoutParams as LinearLayout.LayoutParams).topMargin = dp(16)
-        bSave.setOnClickListener { saveConfig() }
-        cfgBox.addView(bSave)
-        val bTest = button("PROVA CONNESSIONE", Color.WHITE, GREEN_DARK, GREEN_DARK, height = 52, size = 15f)
-        bTest.setOnClickListener { testConnection() }
-        cfgBox.addView(bTest)
-        col.addView(cfgBox)
+        col.addView(section("AMMINISTRATORE (protetto da PIN)"))
+        val adm = card()
+        adm.addView(text("Collegamento del telefono con il codice generato dal portale (Controlli › Telefoni › Nuovo telefono).", 13f, GREY))
+        btnCollega = button("COLLEGA AL PORTALE", GREEN_DARK, height = 56, size = 16f)
+        btnCollega.setOnClickListener { conPin { if (ServerConfig(this).collegato()) scollega() else collega() } }
+        adm.addView(btnCollega)
+        btnIndirizzo = button("INDIRIZZO DEL PORTALE", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 48, size = 14f)
+        btnIndirizzo.setOnClickListener { conPin { cambiaIndirizzo() } }
+        adm.addView(btnIndirizzo)
+        col.addView(adm)
 
         // Aggiornamenti dell'app
         col.addView(section("AGGIORNAMENTI DELL'APP"))
@@ -1197,12 +1321,169 @@ class MainActivity : Activity() {
         return scroll
     }
 
+    private fun refreshServer() {
+        if (!::tvServer.isInitialized) return
+        val cfg = ServerConfig(this)
+        val sb = StringBuilder()
+        if (!cfg.collegato()) {
+            sb.append("Telefono NON collegato al portale.\n")
+            sb.append(if (cfg.scollegato) "Per collegarlo serve un nuovo codice dal portale." else "L'amministratore deve collegarlo con il codice generato dal portale.")
+            cfg.ultimoErrore?.let { sb.append("\n\n$it") }
+        } else {
+            sb.append("Telefono: ").append(cfg.nomeTelefono ?: "—")
+            sb.append("\nSito: ").append(cfg.url.removePrefix("https://"))
+            sb.append("\nUltima sincronizzazione: ").append(timeLabel(cfg.ultimaSync))
+            sb.append("\nIn attesa di invio: ").append(db.inCoda())
+            val ko = db.fallite()
+            if (ko > 0) sb.append("\nRifiutate dal portale: $ko")
+            if (SyncEngine.running) sb.append("\n\n⟳ Sincronizzazione in corso…")
+            else cfg.ultimoErrore?.let { sb.append("\n\nUltimo problema: $it") }
+        }
+        val locali = db.inCoda()
+        if (!cfg.collegato() && locali > 0) sb.append("\n\nOperazioni in attesa sul telefono: $locali")
+        tvServer.text = sb.toString()
+        btnSyncOra.visibility = if (cfg.collegato()) View.VISIBLE else View.GONE
+        btnSyncOra.isEnabled = !SyncEngine.running
+        btnFallite.visibility = if (db.fallite() > 0) View.VISIBLE else View.GONE
+        btnCollega.text = if (cfg.collegato()) "SCOLLEGA DAL PORTALE" else "COLLEGA AL PORTALE"
+    }
+
+    private fun sincronizzaOra() {
+        if (SyncEngine.running) return
+        toast("Sincronizzazione in corso…")
+        Thread {
+            val ok = SyncEngine.run(this)
+            runOnUiThread {
+                refreshServer(); refreshSyncStatus()
+                val cfg = ServerConfig(this)
+                toast(if (ok && cfg.ultimoErrore == null) "Sincronizzazione completata" else cfg.ultimoErrore ?: "Sincronizzazione non riuscita")
+            }
+        }.start()
+    }
+
+    /** Chiede il PIN dell'amministratore (al primo uso lo fa impostare), poi esegue [azione]. */
+    private fun conPin(azione: () -> Unit) {
+        val cfg = ServerConfig(this)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(4), dp(20), dp(8))
+        fun pinEdit(hint: String) = EditText(this).also {
+            stileCampo(it, hint)
+            it.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            it.filters = arrayOf(InputFilter.LengthFilter(8))
+            box.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        }
+        if (!cfg.pinImpostato()) {
+            box.addView(text("Scegli un PIN amministratore (4-8 cifre). Servirà per collegare o scollegare il telefono: non comunicarlo agli operatori.", 14f, GREY))
+            val p1 = pinEdit("Nuovo PIN"); val p2 = pinEdit("Ripeti il PIN")
+            AlertDialog.Builder(this).setTitle("PIN amministratore").setView(box)
+                .setPositiveButton("SALVA") { _, _ ->
+                    val a = p1.text.toString(); val b = p2.text.toString()
+                    when {
+                        a.length < 4 -> alert("PIN non valido", "Il PIN deve avere almeno 4 cifre.")
+                        a != b -> alert("PIN non valido", "I due PIN non coincidono.")
+                        else -> { cfg.impostaPin(a); toast("PIN impostato"); azione() }
+                    }
+                }.setNegativeButton("ANNULLA", null).show()
+        } else {
+            val p = pinEdit("PIN amministratore")
+            AlertDialog.Builder(this).setTitle("PIN amministratore").setView(box)
+                .setPositiveButton("OK") { _, _ ->
+                    if (cfg.verificaPin(p.text.toString())) azione() else alert("PIN errato", "Il PIN non è corretto.")
+                }.setNegativeButton("ANNULLA", null).show()
+        }
+    }
+
+    private fun collega() {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(4), dp(20), dp(8))
+        box.addView(text("Sul portale: Controlli › Telefoni › Nuovo telefono. Inserisci qui il codice mostrato (vale 24 ore, una sola volta).", 14f, GREY))
+        val eNome = campo("Nome del telefono", "es. Samsung piazzale 1", box, "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+        etichetta("Codice di attivazione", box)
+        val eCod = EditText(this)
+        stileCampo(eCod, "es. K7P2-QX9M")
+        eCod.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        eCod.textSize = 22f
+        eCod.typeface = Typeface.MONOSPACE
+        box.addView(eCod)
+        AlertDialog.Builder(this).setTitle("Collega al portale").setView(box)
+            .setPositiveButton("COLLEGA") { _, _ ->
+                val codice = eCod.text.toString().trim(); val nome = eNome.text.toString().trim().ifEmpty { Build.MODEL }
+                if (codice.length < 6) { alert("Codice non valido", "Inserire il codice di attivazione mostrato dal portale."); return@setPositiveButton }
+                toast("Collegamento in corso…")
+                Thread {
+                    try {
+                        val n = Server(this).attiva(codice, nome)
+                        val daInviare = db.accodaNonInviati()
+                        SyncEngine.run(this)
+                        runOnUiThread {
+                            SyncJobService.schedule(this)
+                            refreshServer(); refreshSyncStatus(); refreshCounts()
+                            alert("Telefono collegato", "Telefono «$n» collegato al portale." +
+                                (if (daInviare > 0) "\n\n$daInviare censimenti già presenti sul telefono verranno inviati al portale." else ""))
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { alert("Collegamento non riuscito", Server.messaggio(e)) }
+                    }
+                }.start()
+            }.setNegativeButton("ANNULLA", null).show()
+    }
+
+    private fun scollega() {
+        val coda = db.inCoda()
+        AlertDialog.Builder(this).setTitle("Scollegare il telefono dal portale?")
+            .setMessage("Il telefono smetterà di inviare e ricevere dati. Per ricollegarlo servirà un nuovo codice dal portale." +
+                (if (coda > 0) "\n\nATTENZIONE: $coda operazioni non ancora inviate resteranno sul telefono e partiranno solo dopo il nuovo collegamento." else ""))
+            .setPositiveButton("SCOLLEGA") { _, _ ->
+                ServerConfig(this).scollega(); SyncJobService.annulla(this)
+                refreshServer(); refreshSyncStatus(); toast("Telefono scollegato")
+            }.setNegativeButton("ANNULLA", null).show()
+    }
+
+    private fun cambiaIndirizzo() {
+        val cfg = ServerConfig(this)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(20), dp(4), dp(20), dp(8))
+        val e = campo("Indirizzo del portale", ServerConfig.URL_PREDEFINITO, box, cfg.url)
+        e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        AlertDialog.Builder(this).setTitle("Indirizzo del portale").setView(box)
+            .setPositiveButton("SALVA") { _, _ ->
+                val u = e.text.toString().trim().trimEnd('/')
+                if (!u.startsWith("https://")) { alert("Indirizzo non valido", "L'indirizzo deve iniziare con https://"); return@setPositiveButton }
+                cfg.url = u; cfg.cursore = null; refreshServer(); toast("Indirizzo salvato")
+            }
+            .setNeutralButton("PREDEFINITO") { _, _ -> cfg.url = ServerConfig.URL_PREDEFINITO; cfg.cursore = null; refreshServer() }
+            .setNegativeButton("ANNULLA", null).show()
+    }
+
+    private fun mostraFallite() {
+        val ko = db.operazioniFallite()
+        if (ko.isEmpty()) { refreshServer(); return }
+        val nomi = mapOf(TipoOp.INGRESSO to "Entrata", TipoOp.FOTO to "Foto", TipoOp.USCITA to "Uscita", TipoOp.ZONA to "Spostamento", TipoOp.CORREZIONE to "Correzione")
+        val testo = ko.take(30).joinToString("\n\n") { o ->
+            val targa = db.perUuid(o.uuid)?.targa ?: "?"
+            "• ${nomi[o.tipo] ?: o.tipo} $targa: ${o.errore ?: "errore"}"
+        }
+        AlertDialog.Builder(this).setTitle("Operazioni rifiutate dal portale")
+            .setMessage("$testo\n\nCorreggere i dati (o chiedere all'ufficio) e poi riprovare, oppure scartarle.")
+            .setPositiveButton("RIPROVA") { _, _ -> db.riprovaFallite(); SyncJobService.schedule(this); refreshServer(); refreshSyncStatus() }
+            .setNeutralButton("SCARTA") { _, _ ->
+                AlertDialog.Builder(this).setTitle("Scartare le operazioni rifiutate?")
+                    .setMessage("Non verranno più inviate al portale.")
+                    .setPositiveButton("SCARTA") { _, _ -> db.scartaFallite(); refreshServer(); refreshSyncStatus(); refreshList() }
+                    .setNegativeButton("ANNULLA", null).show()
+            }
+            .setNegativeButton("CHIUDI", null).show()
+    }
+
     // ------------------------------------------------------------------ aggiornamento automatico
 
     /** Modulo di censimento con dati non salvati (l'aggiornamento chiuderebbe l'app). */
     private fun formBusy(): Boolean =
         saving || pendingPhoto != null || photo != null || dataUscita != null ||
-            (::etTarga.isInitialized && etTarga.text.isNotBlank())
+            (::etTarga.isInitialized && etTarga.text.isNotBlank()) || altriCompilati()
 
     /** Controlla (se è il momento) e installa l'aggiornamento se il modulo è vuoto. */
     private fun maybeUpdate(manual: Boolean) {
@@ -1267,165 +1548,6 @@ class MainActivity : Activity() {
         else Updater.lastError(this)?.let { sb.append("\n\n$it") }
         tvUpdate.text = sb.toString()
         btnUpdate.isEnabled = !Updater.running
-    }
-
-    private fun toggleConfig() {
-        val show = cfgBox.visibility != View.VISIBLE
-        if (show) {
-            val cfg = Config(this)
-            etTenant.setText(cfg.tenant); etClient.setText(cfg.clientId); etSite.setText(cfg.siteUrl)
-            etFolder.setText(cfg.folder); etExcel.setText(cfg.excelName)
-        }
-        cfgBox.visibility = if (show) View.VISIBLE else View.GONE
-        btnCfgToggle.text = if (show) "CONFIGURAZIONE (AMMINISTRATORE) ▾" else "CONFIGURAZIONE (AMMINISTRATORE) ▸"
-    }
-
-    private fun refreshOnline() {
-        if (!::tvOnlineStatus.isInitialized) return
-        val cfg = Config(this)
-        val sc = db.syncCounts()
-        val sent = sc[SyncState.SENT] ?: 0
-        val pending = (sc[SyncState.PENDING] ?: 0) + (sc[SyncState.PHOTO_SENT] ?: 0) + db.uscitaUpdatesPending()
-        val failed = sc[SyncState.FAILED] ?: 0
-        val signed = Auth.signedIn(this)
-        val sb = StringBuilder()
-        if (!cfg.ready()) {
-            sb.append("Invio online non ancora configurato.\nAprire \"Configurazione (amministratore)\" e inserire i dati forniti dall'IT.")
-        } else {
-            sb.append("Account: ").append(if (signed) (cfg.account ?: "collegato") else if (cfg.authExpired) "accesso scaduto" else "non collegato")
-            sb.append("\nDestinazione: ").append(cfg.siteUrl.removePrefix("https://")).append(" › Documenti")
-            if (cfg.folder.isNotEmpty()) sb.append(" › ").append(cfg.folder)
-            sb.append("\n\nInviati: $sent\nIn attesa: $pending")
-            if (failed > 0) sb.append("\nIn errore: $failed")
-            sb.append("\nUltimo invio riuscito: ${timeLabel(cfg.lastOk)}")
-            if (SyncEngine.running) sb.append("\n\n⟳ Invio in corso…")
-            else cfg.lastError?.let { if (pending > 0 || failed > 0 || !signed) sb.append("\n\nUltimo problema: $it") }
-        }
-        tvOnlineStatus.text = sb.toString()
-        btnLogin.visibility = if (cfg.ready()) View.VISIBLE else View.GONE
-        if (signed) {
-            btnLogin.text = "ESCI DALL'ACCOUNT"
-            btnLogin.setTextColor(GREEN_DARK)
-            btnLogin.background = ripple(shape(Color.WHITE, 12, GREEN_DARK, 2), false)
-        } else {
-            btnLogin.text = "ACCEDI CON ACCOUNT MICROSOFT"
-            btnLogin.setTextColor(Color.WHITE)
-            btnLogin.background = ripple(shape(GREEN, 12), true)
-        }
-        btnSyncNow.visibility = if (cfg.ready() && signed && pending > 0) View.VISIBLE else View.GONE
-        btnRetry.visibility = if (failed > 0) View.VISIBLE else View.GONE
-    }
-
-    private fun onLoginButton() {
-        if (!Auth.signedIn(this)) {
-            try {
-                startActivity(Auth.loginIntent(this))
-            } catch (e: ActivityNotFoundException) {
-                alert("Browser non disponibile", "Per accedere serve un browser installato sul telefono (es. Chrome).")
-            }
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Uscire dall'account?")
-            .setMessage("I nuovi censimenti resteranno sul telefono e non verranno inviati finché non si accede di nuovo.")
-            .setPositiveButton("ESCI") { _, _ -> Auth.signOut(this); refreshOnline(); refreshSyncStatus() }
-            .setNegativeButton("ANNULLA", null)
-            .show()
-    }
-
-    private fun handleAuthRedirect(i: Intent?) {
-        val uri = i?.data
-        if (!Auth.isRedirect(uri)) return
-        i?.data = null
-        showTab(3)
-        toast("Completamento accesso…")
-        Thread {
-            try {
-                val who = Auth.completeLogin(this, uri!!)
-                runOnUiThread {
-                    toast("Accesso effettuato: $who")
-                    refreshOnline(); refreshSyncStatus()
-                    askBacklogThenSync()
-                }
-            } catch (e: Exception) {
-                runOnUiThread { alert("Accesso non riuscito", e.message ?: e.toString()); refreshOnline() }
-            }
-        }.start()
-    }
-
-    /** Al primo accesso chiede se inviare anche i censimenti già presenti sul telefono. */
-    private fun askBacklogThenSync() {
-        val cfg = Config(this)
-        val pending = db.syncCounts()[SyncState.PENDING] ?: 0
-        if (cfg.backlogAsked || pending == 0) {
-            cfg.backlogAsked = true
-            SyncJobService.schedule(this)
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Censimenti già presenti")
-            .setMessage("Sul telefono ci sono $pending censimenti registrati prima dell'attivazione dell'invio online.\n\nInviarli anche a SharePoint?")
-            .setCancelable(false)
-            .setPositiveButton("SÌ, INVIA TUTTO") { _, _ -> cfg.backlogAsked = true; SyncJobService.schedule(this); refreshOnline() }
-            .setNegativeButton("NO, SOLO I NUOVI") { _, _ ->
-                cfg.backlogAsked = true; db.excludePending(); refreshOnline(); refreshSyncStatus()
-                if (tab == 1) refreshList()
-            }
-            .show()
-    }
-
-    private fun saveConfig() {
-        val tenant = etTenant.text.toString().trim()
-        val client = etClient.text.toString().trim()
-        val site = etSite.text.toString().trim().trimEnd('/')
-        val folder = etFolder.text.toString().trim().trim('/')
-        var excel = etExcel.text.toString().trim()
-        val errors = ArrayList<String>()
-        if (tenant.isEmpty()) errors.add("• ID tenant o dominio")
-        if (!Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$").matches(client)) errors.add("• ID applicazione (formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)")
-        if (!site.startsWith("https://") || !site.contains(".sharepoint.com")) errors.add("• Indirizzo sito (https://….sharepoint.com/sites/…)")
-        if (excel.isEmpty()) excel = Config.DEFAULT_EXCEL
-        if (!excel.endsWith(".xlsx", true)) excel += ".xlsx"
-        if (errors.isNotEmpty()) {
-            alert("Dati non validi", "Controllare:\n" + errors.joinToString("\n"))
-            return
-        }
-        val cfg = Config(this)
-        val identityChanged = tenant != cfg.tenant || client != cfg.clientId
-        val targetChanged = identityChanged || site != cfg.siteUrl || folder != cfg.folder || excel != cfg.excelName
-        cfg.tenant = tenant; cfg.clientId = client; cfg.siteUrl = site; cfg.folder = folder; cfg.excelName = excel
-        if (targetChanged) cfg.clearRemoteCache()
-        if (identityChanged) Auth.signOut(this)
-        cfg.lastError = null
-        hideKeyboard()
-        toggleConfig()
-        refreshOnline(); refreshSyncStatus()
-        toast("Configurazione salvata")
-        if (!Auth.signedIn(this)) onLoginButton() else SyncJobService.schedule(this)
-    }
-
-    private fun testConnection() {
-        val cfg = Config(this)
-        if (!cfg.ready()) { alert("Configurazione incompleta", "Salvare prima la configurazione."); return }
-        if (!Auth.signedIn(this)) { alert("Accesso necessario", "Accedere prima con l'account Microsoft."); return }
-        toast("Verifica in corso…")
-        Thread {
-            val msg = try {
-                val g = Graph({ force -> Auth.accessToken(this, force) })
-                val siteId = g.resolveSite(cfg.siteUrl)
-                val drive = g.driveId(siteId)
-                cfg.driveId = drive
-                val ra = RemoteArchive(g, drive, cfg.folder, cfg.excelName, Config.TABLE, null)
-                val folderOk = ra.folderExists()
-                val excelOk = g.item(drive, if (cfg.folder.isEmpty()) cfg.excelName else "${cfg.folder}/${cfg.excelName}") != null
-                "Connessione riuscita ✓\n\nSito SharePoint raggiungibile.\nCartella \"${cfg.folder}\": " +
-                    (if (folderOk) "presente" else "verrà creata al primo invio") +
-                    "\nFile Excel: " + (if (excelOk) "presente" else "verrà creato al primo invio")
-            } catch (e: Exception) {
-                "Connessione non riuscita:\n\n${e.message ?: e}"
-            }
-            runOnUiThread { alert("Prova connessione", msg); refreshOnline(); refreshSyncStatus() }
-        }.start()
     }
 
     // ------------------------------------------------------------------ utilità
