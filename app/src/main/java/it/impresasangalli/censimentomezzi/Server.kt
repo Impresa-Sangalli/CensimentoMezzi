@@ -27,13 +27,13 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.net.ssl.SSLException
 
 /**
- * Collegamento al sito Censimento Mezzi (https://censimentomezzi.impresasangalli.it, rete aziendale).
+ * Collegamento al portale eDepositeria (https://edepositeria.impresasangalli.it, rete aziendale).
  * Il telefono si collega una volta con il codice di attivazione generato dall'ufficio e riceve un token,
  * conservato cifrato con una chiave del Keystore Android.
  */
 class ServerConfig(ctx: Context) {
     companion object {
-        const val URL_PREDEFINITO = "https://censimentomezzi.impresasangalli.it"
+        const val URL_PREDEFINITO = "https://edepositeria.impresasangalli.it"
         const val CONFIG = "server"
     }
 
@@ -49,7 +49,7 @@ class ServerConfig(ctx: Context) {
     var ultimoErrore: String? get() = p.getString("errore", null); set(v) { put("errore", v) }
     var scollegato: Boolean get() = p.getBoolean("scollegato", false); set(v) { p.edit().putBoolean("scollegato", v).commit() }
 
-    // Dati di configurazione ricevuti dal sito (zone, tipi di veicolo, provvedimenti), usati anche senza rete
+    // Dati di configurazione ricevuti dal portale (zone, tipi di veicolo, provvedimenti), usati anche senza rete
     var zone: List<String>
         get() = p.getString("zone", null)?.split(',')?.filter { it.isNotBlank() } ?: MainActivity.ZONE
         set(v) { put("zone", v.joinToString(",")) }
@@ -82,7 +82,7 @@ class ServerConfig(ctx: Context) {
     fun scollega() { token = null; cursore = null; nomeTelefono = null; ultimoErrore = null; scollegato = true }
 }
 
-/** Errore restituito dal sito: [codice] è la chiave dell'errore (es. "dati_non_validi", "non_autorizzato"). */
+/** Errore restituito dal portale: [codice] è la chiave dell'errore (es. "dati_non_validi", "non_autorizzato"). */
 class ErroreServer(val http: Int, val codice: String, msg: String) : IOException(msg) {
     /** Errori definitivi per quell'operazione: riprovare non serve (dati non validi, permanenza eliminata, ...). */
     val definitivo: Boolean get() = http == 400 || http == 404 || http == 410 || http == 413

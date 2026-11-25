@@ -29,7 +29,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 - Esportazione Excel (`.xlsx`) e ZIP (Excel + cartella `foto/`), condivisione
 - "Azzera archivio"
 
-**SITO** – collegamento al sito Censimento Mezzi (vedi sotto) e aggiornamenti dell'app
+**PORTALE** – collegamento al portale eDepositeria (vedi sotto) e aggiornamenti dell'app
 
 ### Data di uscita
 Per registrarla dopo il censimento:
@@ -111,7 +111,7 @@ L'app si aggiorna da sola scaricando le nuove versioni dalle
 
 **Sul telefono**
 - L'app controlla `version.json` dell'ultima Release all'apertura (al massimo ogni 30 minuti),
-  ogni 6 ore in background e con il pulsante *Controlla aggiornamenti* (scheda SITO).
+  ogni 6 ore in background e con il pulsante *Controlla aggiornamenti* (scheda PORTALE).
 - Scarica l'APK, ne verifica l'impronta SHA-256 e lo installa. Android accetta solo APK firmati
   con la stessa chiave dell'app già installata.
 - Non installa mai se nel modulo di censimento ci sono dati non salvati (targa, foto o data di uscita):
@@ -134,25 +134,25 @@ Le nuove versioni **devono** essere firmate con lo stesso `debug.keystore`
 - A ogni nuova versione aumentare `android:versionCode` e `android:versionName` in
   `app/src/main/AndroidManifest.xml`.
 
-## Collegamento al sito (dalla versione 1.5)
+## Collegamento al portale (dalla versione 1.5)
 
-Il **sito Censimento Mezzi** ([repository privato `censimentomezzi-web`](https://github.com/Impresa-Sangalli/censimentomezzi-web),
-`https://censimentomezzi.impresasangalli.it`, rete aziendale) è l'archivio principale e l'anagrafica in tempo reale per l'ufficio.
+Il **portale eDepositeria** ([repository privato `edepositeria`](https://github.com/Impresa-Sangalli/edepositeria),
+`https://edepositeria.impresasangalli.it`, rete aziendale) è l'archivio principale e l'anagrafica in tempo reale per l'ufficio.
 L'app è lo strumento operativo nel piazzale:
 
 - registra **entrate** (targa, zona, foto, dati facoltativi: marca, modello, colore, tipo, pratica, ente, provvedimento, note),
   **uscite**, **spostamenti di zona** e **correzioni**;
-- mostra l'**elenco aggiornato del piazzale**, compresi i mezzi registrati dagli altri telefoni o dall'ufficio, con le foto del sito;
+- mostra l'**elenco aggiornato del piazzale**, compresi i mezzi registrati dagli altri telefoni o dall'ufficio, con le foto del portale;
 - funziona anche senza rete: ogni operazione va in una **coda** e parte appena il telefono è sul **Wi-Fi aziendale**
   (sincronizzazione all'apertura, dopo ogni operazione e ogni 15 minuti);
-- **non cancella** nulla sul sito: l'eliminazione si fa dall'ufficio.
+- **non cancella** nulla sul portale: l'eliminazione si fa dall'ufficio.
 
-**Collegare un telefono** (una volta, a cura dell'amministratore): sul sito *Controlli › Telefoni › Nuovo telefono* →
-nell'app scheda **SITO › Collega al sito** (protetto da un PIN amministratore, scelto al primo uso) → inserire il codice
-(vale 24 ore, una sola volta). Al collegamento i censimenti già presenti sul telefono vengono inviati al sito.
-Un telefono perso si disattiva dal sito: il suo token smette subito di funzionare.
+**Collegare un telefono** (una volta, a cura dell'amministratore): sul portale *Controlli › Telefoni › Nuovo telefono* →
+nell'app scheda **PORTALE › Collega al portale** (protetto da un PIN amministratore, scelto al primo uso) → inserire il codice
+(vale 24 ore, una sola volta). Al collegamento i censimenti già presenti sul telefono vengono inviati al portale.
+Un telefono perso si disattiva dal portale: il suo token smette subito di funzionare.
 
-Contratto delle API: `docs/api.md` nel repository del sito. Il certificato del sito (`*.impresasangalli.it`, GoDaddy)
+Contratto delle API: `docs/api.md` nel repository del portale. Il certificato del portale (`*.impresasangalli.it`, GoDaddy)
 è verificato normalmente; la radice "GoDaddy TLS Root CA - R1" è inclusa nell'app (`res/raw`) per i telefoni Android
 meno recenti che non l'hanno ancora tra le radici di sistema (`res/xml/network_security_config.xml`).
 
@@ -163,13 +163,13 @@ L'invio a SharePoint delle versioni 1.1–1.4 è stato rimosso.
 app/src/main/AndroidManifest.xml
 app/src/main/res/                    icone e stringhe
 app/src/main/java/it/impresasangalli/censimentomezzi/
-   MainActivity.kt   interfaccia (Censimento / Elenco / Esporta / Sito)
+   MainActivity.kt   interfaccia (Censimento / Elenco / Esporta / Portale)
    Db.kt             archivio locale SQLite
    PhotoStore.kt     salvataggio foto in Pictures/CensimentoMezzi
    Exporter.kt       esportazione Excel e ZIP in Download/CensimentoMezzi
    XlsxWriter.kt     generatore .xlsx senza librerie esterne
    FilesProvider.kt  scambio file con l'app fotocamera e condivisione (Android 8-9)
-   Server.kt         collegamento al sito: indirizzo, token cifrato, PIN, chiamate HTTP
+   Server.kt         collegamento al portale: indirizzo, token cifrato, PIN, chiamate HTTP
    SyncEngine.kt     coda di invio e sincronizzazione del piazzale (JobScheduler)
    Updater.kt        aggiornamento automatico dalle Release GitHub
 .github/workflows/release.yml   compilazione e pubblicazione delle Release

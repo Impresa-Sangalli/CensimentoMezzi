@@ -127,7 +127,7 @@ class MainActivity : Activity() {
         uiHandler.post {
             refreshSyncStatus()
             if (tab == 3) refreshServer()
-            // al termine della sincronizzazione l'elenco mostra i dati ricevuti dal sito
+            // al termine della sincronizzazione l'elenco mostra i dati ricevuti dal portale
             if (!SyncEngine.running) { refreshCounts(); if (tab == 1) refreshList(); if (tab == 2) refreshSummary(); if (tab == 0) checkDuplicate() }
         }
     }
@@ -328,7 +328,7 @@ class MainActivity : Activity() {
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
         tabs.setBackgroundColor(GREEN_DARK)
-        listOf("CENSIMENTO", "ELENCO", "ESPORTA", "SITO").forEachIndexed { i, label ->
+        listOf("CENSIMENTO", "ELENCO", "ESPORTA", "PORTALE").forEachIndexed { i, label ->
             val b = Button(this)
             b.text = label
             b.textSize = 12.5f
@@ -417,7 +417,7 @@ class MainActivity : Activity() {
 
         // 2. Zona
         col.addView(section("2. ZONA DI PARCHEGGIO *"))
-        // zone dal sito (ultime ricevute), tre per riga
+        // zone dal portale (ultime ricevute), tre per riga
         for (riga in ServerConfig(this).zone.chunked(3)) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
@@ -721,7 +721,7 @@ class MainActivity : Activity() {
                 val now = LocalDateTime.now()
                 val saved = PhotoStore.save(this, db, targa, f)
                 db.insert(base.copy(data = now.format(D_FMT), ora = now.format(T_FMT), nomeFile = saved.name, uri = saved.uri, ts = System.currentTimeMillis()))
-                // invio al sito: entrata e foto restano in coda finché il sito non è raggiungibile
+                // invio al portale: entrata e foto restano in coda finché il portale non è raggiungibile
                 db.accoda(TipoOp.INGRESSO, base.uuid)
                 db.accoda(TipoOp.FOTO, base.uuid, org.json.JSONObject().put("foto_uuid", java.util.UUID.randomUUID().toString()))
                 f.delete()
@@ -868,12 +868,12 @@ class MainActivity : Activity() {
         else "Trovati: ${list.size} su ${all.size}"
     }
 
-    /** Stato dell'invio al sito di un censimento: testo e colore, oppure null se non c'è nulla da segnalare. */
+    /** Stato dell'invio al portale di un censimento: testo e colore, oppure null se non c'è nulla da segnalare. */
     private fun statoInvio(c: Censimento): Pair<String, Int>? {
         val err = db.erroreDi(c.uuid)
         return when {
-            db.haOperazioni(c.uuid) && db.operazioniFallite().any { it.uuid == c.uuid } -> "⚠ Rifiutato dal sito: ${err ?: "errore"}" to RED
-            db.haOperazioni(c.uuid) -> "⏳ Da inviare al sito" to ORANGE
+            db.haOperazioni(c.uuid) && db.operazioniFallite().any { it.uuid == c.uuid } -> "⚠ Rifiutato dal portale: ${err ?: "errore"}" to RED
+            db.haOperazioni(c.uuid) -> "⏳ Da inviare al portale" to ORANGE
             !c.sulServer -> "Solo su questo telefono" to GREY
             else -> null
         }
@@ -902,14 +902,14 @@ class MainActivity : Activity() {
         when {
             locale != null -> { iv.setImageBitmap(locale); box.addView(iv, lp) }
             c.fotoIds.isNotEmpty() && ServerConfig(this).collegato() -> {
-                val attesa = text("Caricamento della foto dal sito…", 14f, GREY)
+                val attesa = text("Caricamento della foto dal portale…", 14f, GREY)
                 box.addView(attesa); box.addView(iv, lp)
                 Thread {
                     val bmp = try { val f = Server(this).scaricaFoto(c.fotoIds.first(), 1024); loadBitmap({ f.inputStream() }, 1280) } catch (e: Exception) { null }
-                    runOnUiThread { if (bmp != null) { iv.setImageBitmap(bmp); attesa.visibility = View.GONE } else attesa.text = "Foto non disponibile (sito non raggiungibile)" }
+                    runOnUiThread { if (bmp != null) { iv.setImageBitmap(bmp); attesa.visibility = View.GONE } else attesa.text = "Foto non disponibile (portale non raggiungibile)" }
                 }.start()
             }
-            c.fotoIds.isNotEmpty() -> box.addView(text("La foto è sul sito: collegare il telefono per vederla.", 14f, GREY))
+            c.fotoIds.isNotEmpty() -> box.addView(text("La foto è sul portale: collegare il telefono per vederla.", 14f, GREY))
             else -> box.addView(text(if (c.uri.isNotEmpty()) "Fotografia non trovata sul telefono (forse eliminata dalla galleria)." else "Nessuna foto.", 14f, RED))
         }
         AlertDialog.Builder(this)
@@ -980,7 +980,7 @@ class MainActivity : Activity() {
             }.setNegativeButton("ANNULLA", null).show()
     }
 
-    /** Dopo una modifica locale: aggiorna le viste e avvia l'invio al sito. */
+    /** Dopo una modifica locale: aggiorna le viste e avvia l'invio al portale. */
     private fun datiCambiati() {
         refreshList(); refreshSummary(); refreshCounts(); checkDuplicate()
         SyncJobService.schedule(this)
@@ -1006,7 +1006,7 @@ class MainActivity : Activity() {
     private fun confirmDelete(c: Censimento) {
         AlertDialog.Builder(this)
             .setTitle("Eliminare il censimento?")
-            .setMessage("Targa ${c.targa} – zona ${c.zona} – ${c.data} ${c.ora}\n\nIl censimento non è ancora sul sito: verranno eliminati dal telefono il censimento" +
+            .setMessage("Targa ${c.targa} – zona ${c.zona} – ${c.data} ${c.ora}\n\nIl censimento non è ancora sul portale: verranno eliminati dal telefono il censimento" +
                 (if (c.nomeFile.isNotEmpty()) " e la fotografia ${c.nomeFile}" else "") + ", e non verrà inviato.")
             .setPositiveButton("ELIMINA") { _, _ ->
                 if (c.uri.isNotEmpty()) PhotoStore.delete(this, c.uri)
@@ -1085,7 +1085,7 @@ class MainActivity : Activity() {
         (clear.layoutParams as LinearLayout.LayoutParams).topMargin = dp(24)
         clear.setOnClickListener { confirmClear() }
         col.addView(clear)
-        col.addView(text("Svuota la copia del piazzale su questo telefono. Con il telefono collegato i dati restano sul sito e vengono riscaricati alla sincronizzazione successiva. Le fotografie restano nella cartella del telefono.", 13f, GREY).apply { setPadding(dp(4), dp(6), dp(4), 0) })
+        col.addView(text("Svuota la copia del piazzale su questo telefono. Con il telefono collegato i dati restano sul portale e vengono riscaricati alla sincronizzazione successiva. Le fotografie restano nella cartella del telefono.", 13f, GREY).apply { setPadding(dp(4), dp(6), dp(4), 0) })
         return scroll
     }
 
@@ -1176,10 +1176,10 @@ class MainActivity : Activity() {
         val n = db.count()
         if (n == 0) { toast("L'archivio è già vuoto"); return }
         val nonInviati = db.allNewestFirst().count { !it.sulServer }
-        val warn = if (nonInviati > 0) "\n\nATTENZIONE: $nonInviati censimenti NON sono ancora sul sito e andrebbero persi." else ""
+        val warn = if (nonInviati > 0) "\n\nATTENZIONE: $nonInviati censimenti NON sono ancora sul portale e andrebbero persi." else ""
         AlertDialog.Builder(this)
             .setTitle("Azzerare l'archivio?")
-            .setMessage("Verranno eliminati dal telefono $n censimenti. Quelli già sul sito restano sul sito.\n\nLe fotografie NON vengono cancellate e restano in ${PhotoStore.folderDescription()}.$warn\n\nHai già esportato il censimento completo?")
+            .setMessage("Verranno eliminati dal telefono $n censimenti. Quelli già sul portale restano sul portale.\n\nLe fotografie NON vengono cancellate e restano in ${PhotoStore.folderDescription()}.$warn\n\nHai già esportato il censimento completo?")
             .setPositiveButton("AZZERA") { _, _ ->
                 AlertDialog.Builder(this)
                     .setTitle("Conferma definitiva")
@@ -1195,7 +1195,7 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ------------------------------------------------------------------ sezione SITO (collegamento al sito Censimento Mezzi)
+    // ------------------------------------------------------------------ sezione PORTALE (collegamento al portale eDepositeria)
 
     private fun timeLabel(ms: Long): String {
         if (ms <= 0) return "mai"
@@ -1212,13 +1212,13 @@ class MainActivity : Activity() {
         val ko = db.fallite()
         val err = cfg.ultimoErrore
         val (msg, color) = when {
-            !cfg.collegato() -> (err ?: "Telefono non collegato al sito · tocca qui") + (if (coda > 0) " ($coda in attesa)" else "") to (if (err != null) RED else 0xFF757575.toInt())
-            SyncEngine.running -> "⟳ Sincronizzazione con il sito…" + (if (coda > 0) " ($coda da inviare)" else "") to BLUE
-            ko > 0 -> "⚠ $ko operazioni rifiutate dal sito · tocca per dettagli" to RED
+            !cfg.collegato() -> (err ?: "Telefono non collegato al portale · tocca qui") + (if (coda > 0) " ($coda in attesa)" else "") to (if (err != null) RED else 0xFF757575.toInt())
+            SyncEngine.running -> "⟳ Sincronizzazione con il portale…" + (if (coda > 0) " ($coda da inviare)" else "") to BLUE
+            ko > 0 -> "⚠ $ko operazioni rifiutate dal portale · tocca per dettagli" to RED
             coda > 0 -> "⏳ $coda in attesa di invio" + (err?.let { " · $it" } ?: "") to ORANGE
             err != null -> "⚠ $err" to ORANGE
-            cfg.ultimaSync == 0L -> "Collegato al sito · prima sincronizzazione in corso" to BLUE
-            else -> "✓ Aggiornato con il sito · ${timeLabel(cfg.ultimaSync)}" to GREEN
+            cfg.ultimaSync == 0L -> "Collegato al portale · prima sincronizzazione in corso" to BLUE
+            else -> "✓ Aggiornato con il portale · ${timeLabel(cfg.ultimaSync)}" to GREEN
         }
         tvSync.text = msg
         tvSync.setBackgroundColor(color)
@@ -1274,7 +1274,7 @@ class MainActivity : Activity() {
         return sp
     }
 
-    /* ---------- scheda SITO ---------- */
+    /* ---------- scheda PORTALE ---------- */
     private fun buildServer(): View {
         val scroll = ScrollView(this)
         val col = LinearLayout(this)
@@ -1282,8 +1282,8 @@ class MainActivity : Activity() {
         col.setPadding(dp(16), dp(16), dp(16), dp(24))
         scroll.addView(col)
 
-        col.addView(text("SITO CENSIMENTO MEZZI", 21f, GREEN_DARK, true))
-        col.addView(text("Il telefono invia entrate, uscite e modifiche al sito dell'ufficio e riceve l'elenco aggiornato del piazzale, " +
+        col.addView(text("PORTALE eDEPOSITERIA", 21f, GREEN_DARK, true))
+        col.addView(text("Il telefono invia entrate, uscite e modifiche al portale eDepositeria dell'ufficio e riceve l'elenco aggiornato del piazzale, " +
             "compresi i mezzi registrati dagli altri telefoni. Funziona sul Wi-Fi aziendale: fuori rete le operazioni restano in coda e partono appena possibile.", 14f, GREY)
             .apply { setPadding(0, dp(6), 0, 0) })
 
@@ -1293,18 +1293,18 @@ class MainActivity : Activity() {
         btnSyncOra = button("SINCRONIZZA ORA", GREEN, height = 60)
         btnSyncOra.setOnClickListener { sincronizzaOra() }
         st.addView(btnSyncOra)
-        btnFallite = button("OPERAZIONI RIFIUTATE DAL SITO", Color.WHITE, RED, RED, height = 52, size = 15f)
+        btnFallite = button("OPERAZIONI RIFIUTATE DAL PORTALE", Color.WHITE, RED, RED, height = 52, size = 15f)
         btnFallite.setOnClickListener { mostraFallite() }
         st.addView(btnFallite)
         col.addView(st)
 
         col.addView(section("AMMINISTRATORE (protetto da PIN)"))
         val adm = card()
-        adm.addView(text("Collegamento del telefono con il codice generato dal sito (Controlli › Telefoni › Nuovo telefono).", 13f, GREY))
-        btnCollega = button("COLLEGA AL SITO", GREEN_DARK, height = 56, size = 16f)
+        adm.addView(text("Collegamento del telefono con il codice generato dal portale (Controlli › Telefoni › Nuovo telefono).", 13f, GREY))
+        btnCollega = button("COLLEGA AL PORTALE", GREEN_DARK, height = 56, size = 16f)
         btnCollega.setOnClickListener { conPin { if (ServerConfig(this).collegato()) scollega() else collega() } }
         adm.addView(btnCollega)
-        btnIndirizzo = button("INDIRIZZO DEL SITO", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 48, size = 14f)
+        btnIndirizzo = button("INDIRIZZO DEL PORTALE", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 48, size = 14f)
         btnIndirizzo.setOnClickListener { conPin { cambiaIndirizzo() } }
         adm.addView(btnIndirizzo)
         col.addView(adm)
@@ -1326,8 +1326,8 @@ class MainActivity : Activity() {
         val cfg = ServerConfig(this)
         val sb = StringBuilder()
         if (!cfg.collegato()) {
-            sb.append("Telefono NON collegato al sito.\n")
-            sb.append(if (cfg.scollegato) "Per collegarlo serve un nuovo codice dal sito." else "L'amministratore deve collegarlo con il codice generato dal sito.")
+            sb.append("Telefono NON collegato al portale.\n")
+            sb.append(if (cfg.scollegato) "Per collegarlo serve un nuovo codice dal portale." else "L'amministratore deve collegarlo con il codice generato dal portale.")
             cfg.ultimoErrore?.let { sb.append("\n\n$it") }
         } else {
             sb.append("Telefono: ").append(cfg.nomeTelefono ?: "—")
@@ -1335,7 +1335,7 @@ class MainActivity : Activity() {
             sb.append("\nUltima sincronizzazione: ").append(timeLabel(cfg.ultimaSync))
             sb.append("\nIn attesa di invio: ").append(db.inCoda())
             val ko = db.fallite()
-            if (ko > 0) sb.append("\nRifiutate dal sito: $ko")
+            if (ko > 0) sb.append("\nRifiutate dal portale: $ko")
             if (SyncEngine.running) sb.append("\n\n⟳ Sincronizzazione in corso…")
             else cfg.ultimoErrore?.let { sb.append("\n\nUltimo problema: $it") }
         }
@@ -1345,7 +1345,7 @@ class MainActivity : Activity() {
         btnSyncOra.visibility = if (cfg.collegato()) View.VISIBLE else View.GONE
         btnSyncOra.isEnabled = !SyncEngine.running
         btnFallite.visibility = if (db.fallite() > 0) View.VISIBLE else View.GONE
-        btnCollega.text = if (cfg.collegato()) "SCOLLEGA DAL SITO" else "COLLEGA AL SITO"
+        btnCollega.text = if (cfg.collegato()) "SCOLLEGA DAL PORTALE" else "COLLEGA AL PORTALE"
     }
 
     private fun sincronizzaOra() {
@@ -1398,7 +1398,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.setPadding(dp(20), dp(4), dp(20), dp(8))
-        box.addView(text("Sul sito: Controlli › Telefoni › Nuovo telefono. Inserisci qui il codice mostrato (vale 24 ore, una sola volta).", 14f, GREY))
+        box.addView(text("Sul portale: Controlli › Telefoni › Nuovo telefono. Inserisci qui il codice mostrato (vale 24 ore, una sola volta).", 14f, GREY))
         val eNome = campo("Nome del telefono", "es. Samsung piazzale 1", box, "${Build.MANUFACTURER} ${Build.MODEL}".trim())
         etichetta("Codice di attivazione", box)
         val eCod = EditText(this)
@@ -1407,10 +1407,10 @@ class MainActivity : Activity() {
         eCod.textSize = 22f
         eCod.typeface = Typeface.MONOSPACE
         box.addView(eCod)
-        AlertDialog.Builder(this).setTitle("Collega al sito").setView(box)
+        AlertDialog.Builder(this).setTitle("Collega al portale").setView(box)
             .setPositiveButton("COLLEGA") { _, _ ->
                 val codice = eCod.text.toString().trim(); val nome = eNome.text.toString().trim().ifEmpty { Build.MODEL }
-                if (codice.length < 6) { alert("Codice non valido", "Inserire il codice di attivazione mostrato dal sito."); return@setPositiveButton }
+                if (codice.length < 6) { alert("Codice non valido", "Inserire il codice di attivazione mostrato dal portale."); return@setPositiveButton }
                 toast("Collegamento in corso…")
                 Thread {
                     try {
@@ -1420,8 +1420,8 @@ class MainActivity : Activity() {
                         runOnUiThread {
                             SyncJobService.schedule(this)
                             refreshServer(); refreshSyncStatus(); refreshCounts()
-                            alert("Telefono collegato", "Telefono «$n» collegato al sito." +
-                                (if (daInviare > 0) "\n\n$daInviare censimenti già presenti sul telefono verranno inviati al sito." else ""))
+                            alert("Telefono collegato", "Telefono «$n» collegato al portale." +
+                                (if (daInviare > 0) "\n\n$daInviare censimenti già presenti sul telefono verranno inviati al portale." else ""))
                         }
                     } catch (e: Exception) {
                         runOnUiThread { alert("Collegamento non riuscito", Server.messaggio(e)) }
@@ -1432,8 +1432,8 @@ class MainActivity : Activity() {
 
     private fun scollega() {
         val coda = db.inCoda()
-        AlertDialog.Builder(this).setTitle("Scollegare il telefono dal sito?")
-            .setMessage("Il telefono smetterà di inviare e ricevere dati. Per ricollegarlo servirà un nuovo codice dal sito." +
+        AlertDialog.Builder(this).setTitle("Scollegare il telefono dal portale?")
+            .setMessage("Il telefono smetterà di inviare e ricevere dati. Per ricollegarlo servirà un nuovo codice dal portale." +
                 (if (coda > 0) "\n\nATTENZIONE: $coda operazioni non ancora inviate resteranno sul telefono e partiranno solo dopo il nuovo collegamento." else ""))
             .setPositiveButton("SCOLLEGA") { _, _ ->
                 ServerConfig(this).scollega(); SyncJobService.annulla(this)
@@ -1446,9 +1446,9 @@ class MainActivity : Activity() {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.setPadding(dp(20), dp(4), dp(20), dp(8))
-        val e = campo("Indirizzo del sito", ServerConfig.URL_PREDEFINITO, box, cfg.url)
+        val e = campo("Indirizzo del portale", ServerConfig.URL_PREDEFINITO, box, cfg.url)
         e.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-        AlertDialog.Builder(this).setTitle("Indirizzo del sito").setView(box)
+        AlertDialog.Builder(this).setTitle("Indirizzo del portale").setView(box)
             .setPositiveButton("SALVA") { _, _ ->
                 val u = e.text.toString().trim().trimEnd('/')
                 if (!u.startsWith("https://")) { alert("Indirizzo non valido", "L'indirizzo deve iniziare con https://"); return@setPositiveButton }
@@ -1466,12 +1466,12 @@ class MainActivity : Activity() {
             val targa = db.perUuid(o.uuid)?.targa ?: "?"
             "• ${nomi[o.tipo] ?: o.tipo} $targa: ${o.errore ?: "errore"}"
         }
-        AlertDialog.Builder(this).setTitle("Operazioni rifiutate dal sito")
+        AlertDialog.Builder(this).setTitle("Operazioni rifiutate dal portale")
             .setMessage("$testo\n\nCorreggere i dati (o chiedere all'ufficio) e poi riprovare, oppure scartarle.")
             .setPositiveButton("RIPROVA") { _, _ -> db.riprovaFallite(); SyncJobService.schedule(this); refreshServer(); refreshSyncStatus() }
             .setNeutralButton("SCARTA") { _, _ ->
                 AlertDialog.Builder(this).setTitle("Scartare le operazioni rifiutate?")
-                    .setMessage("Non verranno più inviate al sito.")
+                    .setMessage("Non verranno più inviate al portale.")
                     .setPositiveButton("SCARTA") { _, _ -> db.scartaFallite(); refreshServer(); refreshSyncStatus(); refreshList() }
                     .setNegativeButton("ANNULLA", null).show()
             }

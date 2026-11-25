@@ -16,11 +16,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * Sincronizzazione con il sito:
+ * Sincronizzazione con il portale:
  *  1. configurazione (zone, tipi di veicolo, provvedimenti);
  *  2. invio della coda (entrate, foto, uscite, spostamenti, correzioni) in ordine;
  *  3. ricezione delle modifiche del piazzale fatte dall'ufficio o dagli altri telefoni.
- * Senza rete (fuori dal Wi-Fi aziendale) tutto resta in coda e riparte appena il sito è raggiungibile.
+ * Senza rete (fuori dal Wi-Fi aziendale) tutto resta in coda e riparte appena il portale è raggiungibile.
  */
 object SyncEngine {
     @Volatile var running = false
@@ -49,7 +49,7 @@ object SyncEngine {
                     esegui(ctx, srv, db, op)
                 } catch (e: ErroreServer) {
                     if (e.nonAutorizzato || !e.definitivo) throw e
-                    db.tentativo(op.id, e.message ?: "Errore", true)   // dato rifiutato dal sito: resta visibile, la coda prosegue
+                    db.tentativo(op.id, e.message ?: "Errore", true)   // dato rifiutato dal portale: resta visibile, la coda prosegue
                 }
                 notifyUi()
             }
@@ -108,7 +108,7 @@ object SyncEngine {
         }
         db.completata(op.id)
         if (op.tipo == TipoOp.INGRESSO) db.segnaSulServer(op.uuid)
-        // la risposta del sito diventa la copia locale, se non ci sono altre modifiche del telefono ancora da inviare
+        // la risposta del portale diventa la copia locale, se non ci sono altre modifiche del telefono ancora da inviare
         risposta?.optJSONObject("permanenza")?.let { if (!db.haOperazioni(op.uuid)) db.salvaDalServer(daJson(it)) }
     }
 
@@ -142,7 +142,7 @@ object SyncEngine {
 
     private fun testo(o: JSONObject, k: String): String? = if (o.isNull(k)) null else o.optString(k).ifEmpty { null }
 
-    /** Permanenza del sito → copia locale. */
+    /** Permanenza del portale → copia locale. */
     fun daJson(p: JSONObject): Censimento {
         val ing = try { LocalDateTime.parse(p.getString("data_ingresso")) } catch (e: Exception) { LocalDateTime.now() }
         val foto = p.optJSONArray("foto") ?: JSONArray()
