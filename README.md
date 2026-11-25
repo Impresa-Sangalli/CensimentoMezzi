@@ -5,7 +5,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 
 | | |
 |---|---|
-| Versione | 1.2 (`versionCode` 3) |
+| Versione | 1.3 (`versionCode` 4) |
 | Package | `it.impresasangalli.censimentomezzi` |
 | Android | 8.0 o superiore (`minSdk` 26, `targetSdk` 34) |
 | Linguaggio | Kotlin, solo componenti standard di Android (niente Jetpack Compose né librerie esterne) |
@@ -92,9 +92,36 @@ Note:
 
 ### Linux – `build.sh`
 
-Script originale, scritto per l'ambiente in cui l'app è nata (percorsi in `/home/claude/tools`
-e `/usr/lib/android-sdk`, strumento `dx`, rimosso dai build-tools recenti). Va adattato prima di
-riusarlo altrove.
+Stessi passaggi di `build.ps1`, usato da GitHub Actions. Richiede `ANDROID_HOME` e `KOTLIN_HOME`;
+non crea mai un keystore nuovo (si ferma se `debug.keystore` manca).
+
+## Aggiornamento automatico (dalla versione 1.3)
+
+L'app si aggiorna da sola scaricando le nuove versioni dalle
+[Release di GitHub](https://github.com/Impresa-Sangalli/CensimentoMezzi/releases) via internet
+(Wi-Fi o dati mobili). Il censimento continua a funzionare anche senza rete.
+
+**Pubblicare una nuova versione**
+1. Aumentare `android:versionCode` (+1) e `android:versionName` in `app/src/main/AndroidManifest.xml`.
+2. Fare commit e push su `main`.
+3. Il workflow *Compila e pubblica* (`.github/workflows/release.yml`) compila, firma con il
+   `debug.keystore` (Secret `DEBUG_KEYSTORE_BASE64`), verifica l'impronta del certificato e
+   pubblica la Release `v<versione>` con l'APK e `version.json`.
+   I push che non cambiano la versione vengono solo compilati, senza pubblicare nulla.
+
+**Sul telefono**
+- L'app controlla `version.json` dell'ultima Release all'apertura (al massimo ogni 30 minuti),
+  ogni 6 ore in background e con il pulsante *Controlla aggiornamenti* (scheda ONLINE).
+- Scarica l'APK, ne verifica l'impronta SHA-256 e lo installa. Android accetta solo APK firmati
+  con la stessa chiave dell'app già installata.
+- Non installa mai se nel modulo di censimento ci sono dati non salvati (targa, foto o data di uscita):
+  l'installazione chiude l'app.
+- Serve una sola volta l'autorizzazione **"Installa app sconosciute"** per Censimento Mezzi
+  (l'app la chiede alla prima apertura).
+- **Android 12 e successivi**: installazione senza conferma. **Android 8–11**: il sistema chiede
+  sempre un tocco su "Installa" (ad app chiusa compare una notifica).
+- La versione 1.2 non contiene l'aggiornamento automatico: la 1.3 va installata a mano una volta
+  (scaricandola dalla pagina delle Release), poi le successive arrivano da sole.
 
 ## Firma e aggiornamenti
 
@@ -158,7 +185,9 @@ app/src/main/java/it/impresasangalli/censimentomezzi/
    Auth.kt           accesso Microsoft 365 (OAuth 2.0 + PKCE)
    Graph.kt          client Microsoft Graph: foto in SharePoint, righe nel file Excel
    SyncEngine.kt     coda di invio automatica (JobScheduler)
+   Updater.kt        aggiornamento automatico dalle Release GitHub
+.github/workflows/release.yml   compilazione e pubblicazione delle Release
 build.ps1            compilazione su Windows
-build.sh             compilazione da riga di comando (ambiente Linux originale)
+build.sh             compilazione su Linux / GitHub Actions
 LEGGIMI.txt          istruzioni originali
 ```

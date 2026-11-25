@@ -126,6 +126,9 @@ class MainActivity : Activity() {
         }
     }
     private val zoneCountViews = HashMap<String, TextView>()
+    private lateinit var tvUpdate: TextView
+    private lateinit var btnUpdate: Button
+    private val updateListener: () -> Unit = { uiHandler.post { refreshUpdate() } }
 
     // ------------------------------------------------------------------ ciclo di vita
 
@@ -156,6 +159,7 @@ class MainActivity : Activity() {
         showTab(tab)
 
         handleAuthRedirect(intent)
+        Updater.justUpdated(this)?.let { toast("App aggiornata alla versione $it") }
 
         // Android 8-9: permesso di scrittura per creare Pictures/CensimentoMezzi
         if (PhotoStore.legacy) {
@@ -178,11 +182,18 @@ class MainActivity : Activity() {
         refreshSyncStatus()
         if (tab == 3) refreshOnline()
         SyncJobService.schedule(this)
+        Updater.foreground = true
+        Updater.listener = updateListener
+        UpdateJobService.schedule(this)
+        maybeUpdate(false)
     }
 
     override fun onPause() {
         super.onPause()
         SyncEngine.listener = null
+        Updater.foreground = false
+        Updater.listener = null
+        Updater.setFormBusy(this, formBusy())
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -360,7 +371,7 @@ class MainActivity : Activity() {
         refreshCounts()
         if (i == 1) refreshList()
         if (i == 2) refreshSummary()
-        if (i == 3) refreshOnline()
+        if (i == 3) { refreshOnline(); refreshUpdate() }
     }
 
     private fun refreshCounts() {
@@ -1162,7 +1173,89 @@ class MainActivity : Activity() {
         bTest.setOnClickListener { testConnection() }
         cfgBox.addView(bTest)
         col.addView(cfgBox)
+
+        // Aggiornamenti dell'app
+        col.addView(section("AGGIORNAMENTI DELL'APP"))
+        val up = card()
+        tvUpdate = text("", 15f, Color.BLACK)
+        up.addView(tvUpdate)
+        btnUpdate = button("CONTROLLA AGGIORNAMENTI", Color.WHITE, GREEN_DARK, GREEN_DARK, height = 52, size = 15f)
+        btnUpdate.setOnClickListener { maybeUpdate(true) }
+        up.addView(btnUpdate)
+        col.addView(up)
         return scroll
+    }
+
+    // ------------------------------------------------------------------ aggiornamento automatico
+
+    /** Modulo di censimento con dati non salvati (l'aggiornamento chiuderebbe l'app). */
+    private fun formBusy(): Boolean =
+        saving || pendingPhoto != null || photo != null || dataUscita != null ||
+            (::etTarga.isInitialized && etTarga.text.isNotBlank())
+
+    /** Controlla (se è il momento) e installa l'aggiornamento se il modulo è vuoto. */
+    private fun maybeUpdate(manual: Boolean) {
+        if (Updater.running) return
+        if (manual) toast("Controllo aggiornamenti…")
+        val due = manual || Updater.checkDue(this)
+        Thread {
+            val ready = if (due) Updater.check(this) else Updater.readyFile(this) != null
+            runOnUiThread {
+                refreshUpdate()
+                if (ready) offerInstall(manual)
+                else if (manual) toast(Updater.lastError(this) ?: "L'app è aggiornata (versione ${Updater.currentName(this)})")
+                else askInstallPermissionOnce()
+            }
+        }.start()
+    }
+
+    private fun offerInstall(manual: Boolean) {
+        if (!Updater.foreground || isFinishing) return
+        val name = Updater.readyName(this) ?: return
+        if (formBusy()) {
+            if (manual) alert("Aggiornamento pronto", "La versione $name verrà installata appena il censimento in corso sarà salvato e l'app riaperta.")
+            return
+        }
+        if (!Updater.canInstall(this)) { askInstallPermission(); return }
+        if (!manual && !Updater.promptAllowed(this)) return
+        Updater.setFormBusy(this, false)
+        toast("Installazione della versione $name: l'app si chiuderà, poi riaprirla")
+        Thread { Updater.install(this) }.start()
+    }
+
+    /** Alla prima apertura propone subito l'autorizzazione, così gli aggiornamenti futuri sono automatici. */
+    private fun askInstallPermissionOnce() {
+        if (Updater.canInstall(this) || Updater.permissionAsked(this) || !Updater.foreground) return
+        askInstallPermission()
+    }
+
+    private fun askInstallPermission() {
+        Updater.setPermissionAsked(this)
+        AlertDialog.Builder(this)
+            .setTitle("Aggiornamenti automatici")
+            .setMessage("Per installare da sola le nuove versioni, l'app ha bisogno dell'autorizzazione \"Installa app sconosciute\".\n\n" +
+                "Nella schermata che si apre attivare \"Consenti da questa fonte\", poi tornare indietro.")
+            .setPositiveButton("APRI IMPOSTAZIONI") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                } catch (e: ActivityNotFoundException) {
+                    alert("Impostazione non trovata", "Attivarla da Impostazioni › App › Censimento Mezzi › Installa app sconosciute.")
+                }
+            }
+            .setNegativeButton("PIÙ TARDI", null)
+            .show()
+    }
+
+    private fun refreshUpdate() {
+        if (!::tvUpdate.isInitialized) return
+        val sb = StringBuilder("Versione installata: ${Updater.currentName(this)}")
+        sb.append("\nUltimo controllo: ${timeLabel(Updater.lastCheck(this))}")
+        Updater.readyName(this)?.let { sb.append("\n\nNuova versione $it pronta: si installa all'apertura dell'app, con il modulo di censimento vuoto.") }
+        if (!Updater.canInstall(this)) sb.append("\n\n⚠ Manca l'autorizzazione \"Installa app sconosciute\": gli aggiornamenti non possono installarsi.")
+        if (Updater.running) sb.append("\n\n⟳ Controllo in corso…")
+        else Updater.lastError(this)?.let { sb.append("\n\n$it") }
+        tvUpdate.text = sb.toString()
+        btnUpdate.isEnabled = !Updater.running
     }
 
     private fun toggleConfig() {

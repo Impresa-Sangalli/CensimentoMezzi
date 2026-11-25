@@ -1,0 +1,110 @@
+# Compila l'APK a ogni push su main e, se la versione nel manifest è nuova,
+# pubblica una Release GitHub con l'APK firmato e version.json.
+# Le app installate controllano version.json dell'ultima Release e si aggiornano da sole.
+#
+# Per pubblicare una nuova versione: aumentare android:versionCode e android:versionName
+# in app/src/main/AndroidManifest.xml, poi fare push su main.
+#
+# Secret richiesto: DEBUG_KEYSTORE_BASE64 = debug.keystore codificato in base64.
+name: Compila e pubblica
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'build.sh'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      KOTLIN_VERSION: '2.4.21'
+      KOTLIN_SHA256: '7cc140e76daf416a0424a5557f99afd7ca89ebd463ea1101261e3e01c33e75cd'
+      BUILD_TOOLS: '37.0.0'
+      # Impronta SHA-256 del certificato di debug.keystore: se la chiave fosse diversa,
+      # i telefoni rifiuterebbero l'aggiornamento, quindi la pubblicazione si ferma.
+      CERT_SHA256: 'd64253fee48377593d3a81167c45a13fe01a0ceae663b8477f3e2edeb22117f9'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Versione dal manifest
+        id: ver
+        run: |
+          CODE=$(grep -oP 'android:versionCode="\K[0-9]+' app/src/main/AndroidManifest.xml)
+          NAME=$(grep -oP 'android:versionName="\K[^"]+' app/src/main/AndroidManifest.xml)
+          echo "Versione nel manifest: $NAME (versionCode $CODE)"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          if gh release view "v$NAME" >/dev/null 2>&1; then
+            echo "La versione $NAME è già pubblicata: compilo solo per verifica."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            LATEST=$( (curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/version.json" || echo '{}') | jq -r '.versionCode // 0')
+            if [ "$LATEST" -ge "$CODE" ]; then
+              echo "::error::versionCode $CODE non è maggiore di quello dell'ultima Release ($LATEST): aumentarlo nel manifest."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: JDK 17
+        run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+
+      - name: Compilatore Kotlin ${{ env.KOTLIN_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kotlin.zip" \
+            "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip"
+          echo "${KOTLIN_SHA256}  $RUNNER_TEMP/kotlin.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/kotlin.zip" -d "$RUNNER_TEMP"
+          echo "KOTLIN_HOME=$RUNNER_TEMP/kotlinc" >> "$GITHUB_ENV"
+
+      - name: Android SDK (platform 34, build-tools ${{ env.BUILD_TOOLS }})
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platforms;android-34" "build-tools;${BUILD_TOOLS}" > /dev/null
+          test -f "$ANDROID_HOME/platforms/android-34/android.jar"
+          test -f "$ANDROID_HOME/build-tools/${BUILD_TOOLS}/lib/d8.jar"
+
+      - name: Keystore di firma
+        env:
+          KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::Secret DEBUG_KEYSTORE_BASE64 mancante"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > debug.keystore
+
+      - name: Compilazione
+        env:
+          OUT_APK: CensimentoMezzi-${{ steps.ver.outputs.name }}.apk
+        run: |
+          bash build.sh
+          rm -f debug.keystore
+          CERTS=$("$JAVA_HOME/bin/java" -jar "$ANDROID_HOME/build-tools/${BUILD_TOOLS}/lib/apksigner.jar" verify --print-certs "$OUT_APK")
+          grep -q "certificate SHA-256 digest: ${CERT_SHA256}" <<< "$CERTS" \
+            || { echo "::error::L'APK non è firmato con il debug.keystore originale"; exit 1; }
+
+      - name: Pubblicazione Release
+        if: steps.ver.outputs.publish == 'true'
+        env:
+          NAME: ${{ steps.ver.outputs.name }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          APK="CensimentoMezzi-${NAME}.apk"
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          jq -n --argjson code "$CODE" --arg name "$NAME" --arg sha "$SHA" \
+            --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${NAME}/${APK}" \
+            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha}' > version.json
+          cat version.json
+          gh release create "v${NAME}" "$APK" version.json \
+            --target "$GITHUB_SHA" --title "Censimento Mezzi ${NAME}" --generate-notes --latest
