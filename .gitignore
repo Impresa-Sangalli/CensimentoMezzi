@@ -1,0 +1,39 @@
+# --- Chiavi di firma: MAI su GitHub ---------------------------------------
+# debug.keystore firma tutti gli aggiornamenti: va conservato a parte
+# (es. copia di sicurezza in un percorso aziendale protetto).
+*.keystore
+*.jks
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+
+# --- Output di compilazione ----------------------------------------------
+build/
+out/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.idsig
+
+# --- Strumenti locali e configurazioni della macchina --------------------
+tools/
+local.properties
+.gradle/
+.kotlin/
+captures/
+*.log
+
+# --- Editor / IDE ----------------------------------------------------------
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# --- Sistema operativo / OneDrive -----------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+~$*

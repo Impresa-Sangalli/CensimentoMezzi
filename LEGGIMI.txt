@@ -1,0 +1,64 @@
+CENSIMENTO MEZZI - Impresa Sangalli
+===================================
+APK di debug:  CensimentoMezzi/CensimentoMezzi-debug.apk  (versione 1.2, Android 8.0 o superiore)
+Si installa sopra le versioni precedenti senza perdere i censimenti già registrati.
+
+INSTALLAZIONE
+1. Copiare l'APK sul telefono (e-mail, cavo USB, Drive...).
+2. Aprirlo e consentire "Installa app sconosciute" all'app usata per aprirlo.
+3. Al primo scatto l'app chiede il permesso per la fotocamera.
+
+DATA DI USCITA (versione 1.2)
+Campo facoltativo in fondo al modulo di censimento. Per registrarla in seguito:
+ - scheda ELENCO › cercare la targa › toccare la riga › DATA USCITA, oppure
+ - scheda CENSIMENTO › digitare la targa › pulsante "Registra uscita di questa targa".
+Filtri nell'Elenco: Tutti / Nel piazzale / Usciti. L'Excel ha la colonna "Data uscita".
+
+DOVE FINISCONO I FILE SUL TELEFONO
+- Fotografie:   Immagini (Pictures) / CensimentoMezzi / TARGA.jpg
+                targhe duplicate: TARGA_2.jpg, TARGA_3.jpg ...
+- Esportazioni: Download / CensimentoMezzi / Censimento_Mezzi_AAAAMMGG_HHMM.xlsx (o .zip)
+- Archivio censimenti: database interno dell'app (funziona senza internet)
+
+INVIO AUTOMATICO A SHAREPOINT (versione 1.1)
+Ogni censimento salvato viene inviato in automatico a SharePoint:
+  <Sito> › Documenti › Censimento Mezzi / foto / TARGA.jpg
+  <Sito> › Documenti › Censimento Mezzi / Censimento_Mezzi.xlsx  (una riga per censimento)
+Senza connessione i censimenti restano in coda e partono appena torna la rete
+(anche ad app chiusa). La copia sul telefono resta sempre come riserva.
+
+Configurazione una tantum - a cura dell'IT (Microsoft Entra ID):
+ 1. portal.azure.com › Microsoft Entra ID › Registrazioni app › Nuova registrazione
+    Nome: Censimento Mezzi - Tipi di account: solo questa directory (tenant singolo)
+ 2. Autenticazione › Aggiungi piattaforma › "Applicazioni per dispositivi mobili e desktop"
+    URI di reindirizzamento personalizzato:  it.impresasangalli.censimentomezzi://auth
+ 3. Autorizzazioni API › Microsoft Graph › Delegate:
+    Files.ReadWrite.All, User.Read, offline_access, openid, profile
+    › "Concedi consenso amministratore"
+ 4. Comunicare: ID applicazione (client), ID directory (tenant),
+    indirizzo del sito SharePoint (es. https://impresasangalli.sharepoint.com/sites/NomeSito).
+    Gli operatori devono avere permesso di modifica sulla raccolta Documenti del sito.
+
+Sul telefono: scheda ONLINE › Configurazione (amministratore) › inserire i dati ›
+Salva › accedere con l'account Microsoft aziendale. Da quel momento l'invio è automatico.
+In alternativa i valori possono essere inseriti in Config.kt (DEFAULT_...) prima di
+compilare, così su ogni telefono basta solo l'accesso.
+
+AGGIORNAMENTI
+Le nuove versioni vanno firmate con lo stesso debug.keystore,
+altrimenti Android non le installa sopra la versione precedente.
+
+STRUTTURA
+app/src/main/AndroidManifest.xml
+app/src/main/java/it/impresasangalli/censimentomezzi/
+   MainActivity.kt   interfaccia (Censimento / Elenco / Esporta)
+   Db.kt             archivio locale SQLite
+   PhotoStore.kt     salvataggio foto in Pictures/CensimentoMezzi
+   Exporter.kt       esportazione Excel e ZIP in Download/CensimentoMezzi
+   XlsxWriter.kt     generatore .xlsx senza librerie esterne
+   FilesProvider.kt  scambio file con l'app fotocamera
+   Config.kt         configurazione SharePoint e sessione (token cifrati nel Keystore)
+   Auth.kt           accesso Microsoft 365 (OAuth 2.0 + PKCE)
+   Graph.kt          client Microsoft Graph: foto in SharePoint, righe nel file Excel
+   SyncEngine.kt     coda di invio automatica (JobScheduler)
+build.sh            compilazione da riga di comando (kotlinc + aapt + dx + apksigner)
