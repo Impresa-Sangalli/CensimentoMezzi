@@ -5,7 +5,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 
 | | |
 |---|---|
-| Versione | 1.5 (`versionCode` 6) |
+| Versione | 1.6 (`versionCode` 7) |
 | Package | `it.impresasangalli.censimentomezzi` |
 | Android | 8.0 o superiore (`minSdk` 26, `targetSdk` 34) |
 | Linguaggio | Kotlin, solo componenti standard di Android (niente Jetpack Compose né librerie esterne) |
@@ -146,6 +146,12 @@ L'app è lo strumento operativo nel piazzale:
 - funziona anche senza rete: ogni operazione va in una **coda** e parte appena il telefono è sul **Wi-Fi aziendale**
   (sincronizzazione all'apertura, dopo ogni operazione e ogni 15 minuti);
 - **non cancella** nulla sul portale: l'eliminazione si fa dall'ufficio.
+- **una targa, una sola entrata nel piazzale** (dalla 1.6): una targa già nel piazzale non si può registrare di nuovo (prima va
+  registrata l'uscita). Se un telefono rimasto senza rete invia una targa che nel frattempo risulta già nel piazzale, il portale la
+  rifiuta e l'invio resta **in attesa** (barra rossa, scheda PORTALE, riga rossa nell'Elenco): l'operatore corregge i dati e
+  l'invio riparte, oppure lo **scarta indicando il motivo**, che finisce nel registro attività del portale;
+- **rientro**: se la targa è già stata nel piazzale ed è uscita, il modulo mostra i dati dell'ultima volta e il pulsante
+  «Usa i dati del mezzo» ricompila marca, modello, colore e tipo.
 
 **Collegare un telefono** (una volta, a cura dell'amministratore): sul portale *Controlli › Telefoni › Nuovo telefono* →
 nell'app scheda **PORTALE › Collega al portale** (protetto da un PIN amministratore, scelto al primo uso) → inserire il codice

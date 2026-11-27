@@ -45,6 +45,8 @@ object TipoOp {
     const val USCITA = "uscita"
     const val ZONA = "zona"
     const val CORREZIONE = "correzione"
+    /** L'operatore rinuncia a un invio rimasto in attesa: il motivo va nel registro attività del portale. */
+    const val SCARTO = "scarto"
 }
 
 /** Archivio locale (SQLite): funziona anche senza rete. */
@@ -221,8 +223,11 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
     private fun op(c: Cursor) = Operazione(c.getLong(0), c.getString(1), c.getString(2), try { JSONObject(c.getString(3)) } catch (e: Exception) { JSONObject() },
         c.getInt(4), if (c.isNull(5)) null else c.getString(5), c.getInt(6) != 0)
 
+    /* Stato delle operazioni in coda: fallita = 0 da inviare, 1 rifiutata dal portale, 2 IN ATTESA (la targa è già nel piazzale):
+       le operazioni in attesa e tutte quelle dello stesso censimento restano ferme finché l'operatore non corregge i dati o scarta l'invio. */
     fun prossimaOperazione(): Operazione? {
-        readableDatabase.rawQuery("SELECT id, tipo, uuid, dati, tentativi, errore, fallita FROM coda WHERE fallita = 0 ORDER BY id LIMIT 1", null).use {
+        readableDatabase.rawQuery("SELECT id, tipo, uuid, dati, tentativi, errore, fallita FROM coda WHERE fallita = 0 " +
+                "AND uuid NOT IN (SELECT uuid FROM coda WHERE fallita = 2) ORDER BY id LIMIT 1", null).use {
             return if (it.moveToFirst()) op(it) else null
         }
     }
@@ -249,6 +254,24 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "censimenti.db
             return if (it.moveToFirst()) it.getString(0) else null
         }
     }
+    /** Targa già nel piazzale sul portale: l'operazione resta in attesa di una decisione dell'operatore. */
+    fun sospendi(id: Long, errore: String) {
+        writableDatabase.execSQL("UPDATE coda SET tentativi = tentativi + 1, errore = ?, fallita = 2 WHERE id = ?", arrayOf<Any>(errore, id))
+    }
+    fun operazioniInAttesa(): List<Operazione> {
+        val out = ArrayList<Operazione>()
+        readableDatabase.rawQuery("SELECT id, tipo, uuid, dati, tentativi, errore, fallita FROM coda WHERE fallita = 2 ORDER BY id", null).use {
+            while (it.moveToNext()) out.add(op(it))
+        }
+        return out
+    }
+    fun inAttesa(): Int = conta("SELECT COUNT(DISTINCT uuid) FROM coda WHERE fallita = 2")
+    fun inAttesaDi(uuid: String): Boolean = conta("SELECT COUNT(*) FROM coda WHERE fallita = 2 AND uuid = '" + uuid.replace("'", "") + "'") > 0
+    /** Dopo una modifica dell'operatore: l'invio riparte (se la targa è ancora nel piazzale il portale lo rifiuta di nuovo). */
+    fun sblocca(uuid: String) { writableDatabase.execSQL("UPDATE coda SET fallita = 0, errore = NULL WHERE fallita = 2 AND uuid = ?", arrayOf<Any>(uuid)) }
+    /** Toglie dalla coda tutte le operazioni di un censimento. */
+    fun scartaOperazioni(uuid: String) { writableDatabase.delete("coda", "uuid = ?", arrayOf(uuid)) }
+
     fun riprovaFallite() { writableDatabase.execSQL("UPDATE coda SET fallita = 0, errore = NULL WHERE fallita = 1") }
     fun scartaFallite() { writableDatabase.delete("coda", "fallita = 1", null) }
 
