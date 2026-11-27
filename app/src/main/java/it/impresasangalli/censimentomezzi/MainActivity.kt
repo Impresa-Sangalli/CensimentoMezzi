@@ -16,7 +16,9 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.media.ExifInterface
 import android.net.Uri
@@ -62,7 +64,6 @@ class MainActivity : Activity() {
 
         private val VIOLA = 0xFF5B2A9A.toInt()       // palette "Viola notte", come il portale eDepositeria
         private val VIOLA_DARK = 0xFF3B1566.toInt()
-        private val VIOLA_LIGHT = 0xFFF0EAFA.toInt()
         // il verde resta solo per gli stati: "Nel piazzale", conferme, sincronizzazione riuscita
         private val VERDE = 0xFF1B7F3B.toInt()
         private val VERDE_DARK = 0xFF125A29.toInt()
@@ -71,7 +72,13 @@ class MainActivity : Activity() {
         private val ORANGE = 0xFFE65100.toInt()
         private val BLUE = 0xFF1565C0.toInt()
         private val GREY = 0xFF616161.toInt()
-        private val BG = 0xFFF6F4F9.toInt()
+        private val BG = 0xFFF5F6F8.toInt()
+        // neutri (testi quasi neri, bordi e fondi grigi): il viola resta su intestazione, scheda attiva e pulsanti principali
+        private val INK = 0xFF1A1A1A.toInt()
+        private val LINE = 0xFFE6E7EA.toInt()
+        private val LINE_STRONG = 0xFFC9CDD3.toInt()
+        private val GRIGIO = 0xFFF2F3F5.toInt()
+        private val MUTE = 0xFF6B6F76.toInt()
 
         private val D_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy")
         private val T_FMT = DateTimeFormatter.ofPattern("HH:mm:ss")
@@ -233,6 +240,14 @@ class MainActivity : Activity() {
         return g
     }
 
+    /** Scheda in alto: bianca con riga grigia sotto; quella attiva con la riga viola. */
+    private fun schedaSfondo(sel: Boolean): Drawable {
+        val l = LayerDrawable(arrayOf(ColorDrawable(Color.WHITE), ColorDrawable(if (sel) VIOLA else LINE)))
+        l.setLayerGravity(1, Gravity.BOTTOM)
+        l.setLayerHeight(1, dp(if (sel) 3 else 1))
+        return l
+    }
+
     private fun ripple(d: Drawable, dark: Boolean): Drawable =
         RippleDrawable(ColorStateList.valueOf(if (dark) 0x40FFFFFF else 0x30000000), d, null)
 
@@ -259,7 +274,7 @@ class MainActivity : Activity() {
     }
 
     private fun section(title: String): TextView {
-        val t = text(title, 15f, VIOLA_DARK, true)
+        val t = text(title, 15f, INK, true)
         t.letterSpacing = 0.05f
         t.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20) }
         return t
@@ -268,7 +283,7 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout {
         val l = LinearLayout(this)
         l.orientation = LinearLayout.VERTICAL
-        l.background = shape(Color.WHITE, 14, 0xFFE2DDEA.toInt(), 1)
+        l.background = shape(Color.WHITE, 14, LINE, 1)
         l.setPadding(dp(14), dp(12), dp(14), dp(14))
         l.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
         return l
@@ -294,7 +309,7 @@ class MainActivity : Activity() {
         e.filters = arrayOf(plateFilter, InputFilter.LengthFilter(10))
         e.setTextColor(Color.BLACK)
         e.setHintTextColor(0xFF9E9E9E.toInt())
-        e.background = shape(Color.WHITE, 10, VIOLA, 2)
+        e.background = shape(Color.WHITE, 10, LINE_STRONG, 2)
         e.setPadding(dp(14), dp(10), dp(14), dp(10))
         return e
     }
@@ -332,7 +347,7 @@ class MainActivity : Activity() {
         // Barra delle sezioni
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
-        tabs.setBackgroundColor(VIOLA_DARK)
+        tabs.setBackgroundColor(Color.WHITE)
         listOf("CENSIMENTO", "ELENCO", "ESPORTA", "PORTALE").forEachIndexed { i, label ->
             val b = Button(this)
             b.text = label
@@ -369,8 +384,8 @@ class MainActivity : Activity() {
         screens.forEachIndexed { idx, v -> v.visibility = if (idx == i) View.VISIBLE else View.GONE }
         tabButtons.forEachIndexed { idx, b ->
             val sel = idx == i
-            b.setTextColor(if (sel) VIOLA_DARK else Color.WHITE)
-            b.background = ripple(shape(if (sel) Color.WHITE else VIOLA_DARK, 0), !sel)
+            b.setTextColor(if (sel) VIOLA else MUTE)
+            b.background = ripple(schedaSfondo(sel), false)
         }
         refreshCounts()
         if (i == 1) refreshList()
@@ -420,7 +435,7 @@ class MainActivity : Activity() {
         }
         col.addView(btnDupUscita)
         // rientro di un mezzo già uscito: ricompila marca, modello, colore e tipo dall'ultima entrata
-        btnDupDati = button("USA I DATI DEL MEZZO", VIOLA_DARK, height = 52, size = 15f)
+        btnDupDati = button("USA I DATI DEL MEZZO", Color.WHITE, INK, LINE_STRONG, height = 52, size = 15f)
         btnDupDati.visibility = View.GONE
         btnDupDati.setOnClickListener {
             hideKeyboard()
@@ -464,7 +479,7 @@ class MainActivity : Activity() {
         ivPreview.visibility = View.GONE
         ivPreview.setOnClickListener { onScatta() }
         col.addView(ivPreview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(240)).apply { topMargin = dp(8) })
-        btnFoto = button("SCATTA FOTO", VIOLA_DARK, height = 64)
+        btnFoto = button("SCATTA FOTO", VIOLA, height = 64)
         btnFoto.setOnClickListener { hideKeyboard(); onScatta() }
         col.addView(btnFoto)
 
@@ -495,7 +510,7 @@ class MainActivity : Activity() {
         col.addView(text("Da compilare quando il mezzo lascia il piazzale. Si può inserire anche in seguito dalla scheda ELENCO.", 14f, GREY).apply { setPadding(0, dp(4), 0, 0) })
         val ur = LinearLayout(this)
         ur.orientation = LinearLayout.HORIZONTAL
-        btnUscita = button("IMPOSTA DATA DI USCITA", Color.WHITE, VIOLA_DARK, VIOLA_DARK, height = 56, size = 16f)
+        btnUscita = button("IMPOSTA DATA DI USCITA", Color.WHITE, INK, LINE_STRONG, height = 56, size = 16f)
         btnUscita.layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f)
         btnUscita.setOnClickListener {
             hideKeyboard()
@@ -534,8 +549,8 @@ class MainActivity : Activity() {
     private fun updateZoneButtons() {
         zoneButtons.forEach { (z, b) ->
             val sel = z == zona
-            b.setTextColor(if (sel) Color.WHITE else VIOLA_DARK)
-            b.background = ripple(shape(if (sel) VIOLA else Color.WHITE, 12, VIOLA, 2), sel)
+            b.setTextColor(if (sel) Color.WHITE else INK)
+            b.background = ripple(shape(if (sel) VIOLA else Color.WHITE, 12, if (sel) VIOLA else LINE_STRONG, 2), sel)
         }
     }
 
@@ -543,8 +558,8 @@ class MainActivity : Activity() {
         val d = dataUscita
         if (d == null) {
             btnUscita.text = "IMPOSTA DATA DI USCITA"
-            btnUscita.setTextColor(VIOLA_DARK)
-            btnUscita.background = ripple(shape(Color.WHITE, 12, VIOLA_DARK, 2), false)
+            btnUscita.setTextColor(INK)
+            btnUscita.background = ripple(shape(Color.WHITE, 12, LINE_STRONG, 2), false)
             btnUscitaClear.visibility = View.GONE
         } else {
             btnUscita.text = "USCITA: ${d.format(D_FMT)}  ·  MODIFICA"
@@ -592,8 +607,8 @@ class MainActivity : Activity() {
             listOfNotNull(last.pratica?.let { "pratica $it" }, last.ente, last.provvedimento).joinToString(" · ").takeIf { it.isNotEmpty() }?.let { righe.add("Ultima volta: $it") }
             if (veicolo.isNotEmpty() || last.tipoId != null) righe.add("Tocca «Usa i dati del mezzo» per ricompilarli, poi controllali.")
             tvDup.text = righe.joinToString("\n")
-            tvDup.setTextColor(VIOLA_DARK)
-            tvDup.background = shape(VIOLA_LIGHT, 10); tvDup.setPadding(dp(12), dp(10), dp(12), dp(10))
+            tvDup.setTextColor(INK)
+            tvDup.background = shape(GRIGIO, 10, LINE, 1); tvDup.setPadding(dp(12), dp(10), dp(12), dp(10))
             tvDup.visibility = View.VISIBLE
             btnDupDati.visibility = if (veicolo.isNotEmpty() || last.tipoId != null) View.VISIBLE else View.GONE
         }
@@ -616,14 +631,14 @@ class MainActivity : Activity() {
             ivPreview.setImageDrawable(null)
             ivPreview.visibility = View.GONE
             btnFoto.text = "SCATTA FOTO"
-            btnFoto.background = ripple(shape(VIOLA_DARK, 12), true)
+            btnFoto.background = ripple(shape(VIOLA, 12), true)
             btnFoto.setTextColor(Color.WHITE)
         } else {
             ivPreview.setImageBitmap(loadBitmap({ f.inputStream() }, 1280))
             ivPreview.visibility = View.VISIBLE
             btnFoto.text = "FOTO ACQUISITA ✓  ·  RIFAI FOTO"
-            btnFoto.background = ripple(shape(Color.WHITE, 12, VIOLA_DARK, 2), false)
-            btnFoto.setTextColor(VIOLA_DARK)
+            btnFoto.background = ripple(shape(Color.WHITE, 12, LINE_STRONG, 2), false)
+            btnFoto.setTextColor(INK)
         }
     }
 
@@ -815,8 +830,8 @@ class MainActivity : Activity() {
             val t = text(c.targa, 20f, Color.BLACK, true)
             t.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             top.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val z = text("Zona ${c.zona}", 15f, Color.WHITE, true)
-            z.background = shape(VIOLA, 14)
+            val z = text("Zona ${c.zona}", 15f, INK, true)
+            z.background = shape(GRIGIO, 14, LINE, 1)
             z.setPadding(dp(10), dp(3), dp(10), dp(3))
             top.addView(z)
             row.addView(top)
@@ -886,8 +901,8 @@ class MainActivity : Activity() {
     private fun updateFilterButtons() {
         filterButtons.forEachIndexed { i, b ->
             val sel = i == filtroElenco
-            b.setTextColor(if (sel) Color.WHITE else VIOLA_DARK)
-            b.background = ripple(shape(if (sel) VIOLA else Color.WHITE, 10, VIOLA, 2), sel)
+            b.setTextColor(if (sel) Color.WHITE else INK)
+            b.background = ripple(shape(if (sel) VIOLA else Color.WHITE, 10, if (sel) VIOLA else LINE_STRONG, 2), sel)
         }
     }
 
@@ -1132,7 +1147,7 @@ class MainActivity : Activity() {
         col.setPadding(dp(16), dp(16), dp(16), dp(24))
         scroll.addView(col)
 
-        val title = text("ESPORTA CENSIMENTO COMPLETO", 21f, VIOLA_DARK, true)
+        val title = text("ESPORTA CENSIMENTO COMPLETO", 21f, INK, true)
         col.addView(title)
 
         val sum = card()
@@ -1145,9 +1160,9 @@ class MainActivity : Activity() {
             for (c in 0 until 3) {
                 val z = riga.getOrNull(c)
                 if (z == null) { row.addView(View(this), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)); continue }
-                val cell = text("", 16f, VIOLA_DARK, true)
+                val cell = text("", 16f, INK, true)
                 cell.gravity = Gravity.CENTER
-                cell.background = shape(VIOLA_LIGHT, 8)
+                cell.background = shape(GRIGIO, 8)
                 cell.setPadding(0, dp(8), 0, dp(8))
                 row.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     leftMargin = if (c == 0) 0 else dp(4); rightMargin = if (c == 2) 0 else dp(4); topMargin = dp(6)
@@ -1169,7 +1184,7 @@ class MainActivity : Activity() {
         val zp = card()
         zp.addView(text("Archivio ZIP (facoltativo)", 17f, Color.BLACK, true))
         zp.addView(text("Contiene il file Excel e tutte le fotografie (cartella \"foto\"). Utile per inviare il censimento completo in un unico file.", 14f, GREY))
-        val bz = button("ESPORTA ZIP (EXCEL + FOTO)", VIOLA_DARK, height = 64)
+        val bz = button("ESPORTA ZIP (EXCEL + FOTO)", Color.WHITE, INK, LINE_STRONG, height = 64)
         bz.setOnClickListener { startExport(true) }
         zp.addView(bz)
         col.addView(zp)
@@ -1337,7 +1352,7 @@ class MainActivity : Activity() {
         e.textSize = 15f
         e.setTextColor(Color.BLACK)
         e.setHintTextColor(0xFF9E9E9E.toInt())
-        e.background = shape(Color.WHITE, 8, 0xFFBDBDBD.toInt(), 1)
+        e.background = shape(Color.WHITE, 8, LINE_STRONG, 1)
         e.setPadding(dp(10), dp(8), dp(10), dp(8))
     }
 
@@ -1373,7 +1388,7 @@ class MainActivity : Activity() {
         val tipi = ServerConfig(this).tipi()
         val sp = android.widget.Spinner(this)
         sp.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("—") + tipi.map { it.second })
-        sp.background = shape(Color.WHITE, 8, 0xFFBDBDBD.toInt(), 1)
+        sp.background = shape(Color.WHITE, 8, LINE_STRONG, 1)
         sp.setSelection(tipi.indexOfFirst { it.first == scelto } + 1)
         parent.addView(sp, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
         return sp
@@ -1387,7 +1402,7 @@ class MainActivity : Activity() {
         col.setPadding(dp(16), dp(16), dp(16), dp(24))
         scroll.addView(col)
 
-        col.addView(text("PORTALE eDEPOSITERIA", 21f, VIOLA_DARK, true))
+        col.addView(text("PORTALE eDEPOSITERIA", 21f, INK, true))
         col.addView(text("Il telefono invia entrate, uscite e modifiche al portale eDepositeria dell'ufficio e riceve l'elenco aggiornato del piazzale, " +
             "compresi i mezzi registrati dagli altri telefoni. Funziona sul Wi-Fi aziendale: fuori rete le operazioni restano in coda e partono appena possibile.", 14f, GREY)
             .apply { setPadding(0, dp(6), 0, 0) })
@@ -1406,7 +1421,7 @@ class MainActivity : Activity() {
         col.addView(section("AMMINISTRATORE (protetto da PIN)"))
         val adm = card()
         adm.addView(text("Collegamento del telefono con il codice generato dal portale (Controlli › Telefoni › Nuovo telefono).", 13f, GREY))
-        btnCollega = button("COLLEGA AL PORTALE", VIOLA_DARK, height = 56, size = 16f)
+        btnCollega = button("COLLEGA AL PORTALE", VIOLA, height = 56, size = 16f)
         btnCollega.setOnClickListener { conPin { if (ServerConfig(this).collegato()) scollega() else collega() } }
         adm.addView(btnCollega)
         btnIndirizzo = button("INDIRIZZO DEL PORTALE", Color.WHITE, GREY, 0xFFBDBDBD.toInt(), height = 48, size = 14f)
@@ -1419,7 +1434,7 @@ class MainActivity : Activity() {
         val up = card()
         tvUpdate = text("", 15f, Color.BLACK)
         up.addView(tvUpdate)
-        btnUpdate = button("CONTROLLA AGGIORNAMENTI", Color.WHITE, VIOLA_DARK, VIOLA_DARK, height = 52, size = 15f)
+        btnUpdate = button("CONTROLLA AGGIORNAMENTI", Color.WHITE, INK, LINE_STRONG, height = 52, size = 15f)
         btnUpdate.setOnClickListener { maybeUpdate(true) }
         up.addView(btnUpdate)
         col.addView(up)
