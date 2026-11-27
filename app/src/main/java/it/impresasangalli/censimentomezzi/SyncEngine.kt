@@ -48,6 +48,8 @@ object SyncEngine {
                 try {
                     esegui(ctx, srv, db, op)
                 } catch (e: ErroreServer) {
+                    // targa già nel piazzale: l'entrata (o la correzione) aspetta l'operatore, il resto della coda prosegue
+                    if (e.conflitto) { db.sospendi(op.id, e.message ?: "Targa già nel piazzale"); notifyUi(); continue }
                     if (e.nonAutorizzato || !e.definitivo) throw e
                     db.tentativo(op.id, e.message ?: "Errore", true)   // dato rifiutato dal portale: resta visibile, la coda prosegue
                 }
@@ -104,6 +106,7 @@ object SyncEngine {
             TipoOp.USCITA -> srv.post("ingressi/${op.uuid}/uscita", JSONObject().put("data_uscita", op.dati.opt("data_uscita") ?: JSONObject.NULL))
             TipoOp.ZONA -> srv.post("ingressi/${op.uuid}/zona", JSONObject().put("zona", op.dati.optString("zona")))
             TipoOp.CORREZIONE -> srv.post("ingressi/${op.uuid}/correzione", op.dati)
+            TipoOp.SCARTO -> { srv.post("scarti", op.dati); null }
             else -> null
         }
         db.completata(op.id)
@@ -112,7 +115,7 @@ object SyncEngine {
         risposta?.optJSONObject("permanenza")?.let { if (!db.haOperazioni(op.uuid)) db.salvaDalServer(daJson(it)) }
     }
 
-    private fun isoIngresso(c: Censimento): String = try {
+    fun isoIngresso(c: Censimento): String = try {
         LocalDateTime.of(LocalDate.parse(c.data, D_FMT), LocalTime.parse(c.ora, T_FMT)).toString()
     } catch (e: Exception) {
         LocalDateTime.now().withNano(0).toString()

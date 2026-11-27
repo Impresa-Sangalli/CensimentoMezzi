@@ -98,6 +98,7 @@ class MainActivity : Activity() {
     private lateinit var tvLast: TextView
     private lateinit var btnUscita: Button
     private lateinit var btnDupUscita: Button
+    private lateinit var btnDupDati: Button
     private lateinit var btnUscitaClear: Button
     private val filterButtons = ArrayList<Button>()
     private lateinit var btnSalva: Button
@@ -346,7 +347,7 @@ class MainActivity : Activity() {
         // Stato dell'invio online
         tvSync = text("", 14f, Color.WHITE, true)
         tvSync.setPadding(dp(16), dp(7), dp(16), dp(7))
-        tvSync.setOnClickListener { hideKeyboard(); showTab(3) }
+        tvSync.setOnClickListener { hideKeyboard(); if (db.inAttesa() > 0) mostraInAttesa() else showTab(3) }
         root.addView(tvSync)
 
         val content = FrameLayout(this)
@@ -411,9 +412,17 @@ class MainActivity : Activity() {
         btnDupUscita.visibility = View.GONE
         btnDupUscita.setOnClickListener {
             hideKeyboard()
-            db.byTarga(currentTarga()).firstOrNull()?.let { editUscita(it) }
+            db.byTarga(currentTarga()).firstOrNull { it.dataUscita == null }?.let { editUscita(it) }
         }
         col.addView(btnDupUscita)
+        // rientro di un mezzo già uscito: ricompila marca, modello, colore e tipo dall'ultima entrata
+        btnDupDati = button("USA I DATI DEL MEZZO", GREEN_DARK, height = 52, size = 15f)
+        btnDupDati.visibility = View.GONE
+        btnDupDati.setOnClickListener {
+            hideKeyboard()
+            db.byTarga(currentTarga()).firstOrNull()?.let { ricompilaDati(it) }
+        }
+        col.addView(btnDupDati)
 
         // 2. Zona
         col.addView(section("2. ZONA DI PARCHEGGIO *"))
@@ -557,19 +566,44 @@ class MainActivity : Activity() {
     private fun checkDuplicate() {
         val t = currentTarga()
         val prev = if (t.length >= 3) db.byTarga(t) else emptyList()
-        if (prev.isEmpty()) {
-            tvDup.visibility = View.GONE
-            btnDupUscita.visibility = View.GONE
-        } else {
+        val aperta = prev.firstOrNull { it.dataUscita == null }
+        tvDup.visibility = View.GONE; btnDupUscita.visibility = View.GONE; btnDupDati.visibility = View.GONE
+        if (aperta != null) {
+            // già nel piazzale: non si registra una seconda volta (prima va registrata l'uscita)
+            tvDup.text = "⛔ Targa già nel piazzale: zona ${aperta.zona}, entrata il ${aperta.data} alle ${aperta.ora.take(5)}.\n" +
+                "Non si può registrare di nuovo finché non ne viene registrata l'uscita."
+            tvDup.setTextColor(RED)
+            tvDup.background = shape(0xFFFFEBEE.toInt(), 10); tvDup.setPadding(dp(12), dp(10), dp(12), dp(10))
+            tvDup.visibility = View.VISIBLE
+            btnDupUscita.text = "REGISTRA USCITA DI QUESTA TARGA"
+            btnDupUscita.visibility = View.VISIBLE
+        } else if (prev.isNotEmpty()) {
+            // rientro: il mezzo è già stato nel piazzale ed è uscito, si può registrare di nuovo
             val last = prev.first()
             val volte = if (prev.size == 1) "1 volta" else "${prev.size} volte"
-            tvDup.text = "Attenzione: targa già censita $volte (ultima: zona ${last.zona}, ${last.data} ${last.ora.take(5)}).\n" +
-                "La nuova foto non sovrascrive le precedenti: verrà salvata con suffisso progressivo." +
-                (if (last.dataUscita != null) "\nUscita registrata il ${last.dataUscita}." else "")
+            val veicolo = listOfNotNull(last.marca, last.modello, last.colore).joinToString(" ")
+            val righe = mutableListOf("ℹ Rientro: targa già stata nel piazzale $volte (ultima entrata ${last.data}, zona ${last.zona}" +
+                (last.dataUscita?.let { ", uscita il $it" } ?: "") + ").")
+            if (veicolo.isNotEmpty() || last.tipoNome != null) righe.add("Mezzo: " + listOfNotNull(veicolo.ifEmpty { null }, last.tipoNome).joinToString(" · "))
+            listOfNotNull(last.pratica?.let { "pratica $it" }, last.ente, last.provvedimento).joinToString(" · ").takeIf { it.isNotEmpty() }?.let { righe.add("Ultima volta: $it") }
+            if (veicolo.isNotEmpty() || last.tipoId != null) righe.add("Tocca «Usa i dati del mezzo» per ricompilarli, poi controllali.")
+            tvDup.text = righe.joinToString("\n")
+            tvDup.setTextColor(GREEN_DARK)
+            tvDup.background = shape(GREEN_LIGHT, 10); tvDup.setPadding(dp(12), dp(10), dp(12), dp(10))
             tvDup.visibility = View.VISIBLE
-            btnDupUscita.text = if (last.dataUscita == null) "REGISTRA USCITA DI QUESTA TARGA" else "MODIFICA DATA DI USCITA (${last.dataUscita})"
-            btnDupUscita.visibility = View.VISIBLE
+            btnDupDati.visibility = if (veicolo.isNotEmpty() || last.tipoId != null) View.VISIBLE else View.GONE
         }
+    }
+
+    /** Rientro: copia marca, modello, colore e tipo dall'ultima entrata della stessa targa (pratica ed ente cambiano a ogni entrata). */
+    private fun ricompilaDati(last: Censimento) {
+        last.marca?.let { etMarca.setText(it) }
+        last.modello?.let { etModello.setText(it) }
+        last.colore?.let { etColore.setText(it) }
+        last.tipoId?.let { id -> val i = ServerConfig(this).tipi().indexOfFirst { it.first == id }; if (i >= 0) spTipo.setSelection(i + 1) }
+        altriBox.visibility = View.VISIBLE
+        btnAltri.text = "NASCONDI ALTRI DATI ▾"
+        toast("Dati del mezzo ricompilati: controllali prima di salvare")
     }
 
     private fun updatePreview() {
@@ -689,6 +723,9 @@ class MainActivity : Activity() {
         val errors = ArrayList<String>()
         if (targa.isEmpty()) errors.add("• Inserire la targa")
         else if (targa.length < 3) errors.add("• Targa troppo corta")
+        else db.byTarga(targa).firstOrNull { it.dataUscita == null }?.let {
+            errors.add("• La targa è già nel piazzale (zona ${it.zona}, dal ${it.data}): registrarne prima l'uscita")
+        }
         if (zona == null) errors.add("• Selezionare la zona di parcheggio")
         dataUscita?.let { if (it.isBefore(LocalDate.now())) errors.add("• La data di uscita non può essere precedente alla data del censimento") }
         val f = photo
@@ -872,6 +909,7 @@ class MainActivity : Activity() {
     private fun statoInvio(c: Censimento): Pair<String, Int>? {
         val err = db.erroreDi(c.uuid)
         return when {
+            db.inAttesaDi(c.uuid) -> "⛔ IN ATTESA: ${err ?: "targa già nel piazzale"}.\nCorreggi i dati per inviarlo, oppure scarta l'invio (ALTRO…)." to RED
             db.haOperazioni(c.uuid) && db.operazioniFallite().any { it.uuid == c.uuid } -> "⚠ Rifiutato dal portale: ${err ?: "errore"}" to RED
             db.haOperazioni(c.uuid) -> "⏳ Da inviare al portale" to ORANGE
             !c.sulServer -> "Solo su questo telefono" to GREY
@@ -922,12 +960,69 @@ class MainActivity : Activity() {
     }
 
     private fun altreAzioni(c: Censimento) {
-        val voci = mutableListOf("Sposta in un'altra zona", "Correggi i dati")
-        val eliminabile = !c.sulServer
-        if (eliminabile) voci.add("Elimina dal telefono")
-        AlertDialog.Builder(this).setTitle(c.targa).setItems(voci.toTypedArray()) { _, i ->
-            when (i) { 0 -> spostaZona(c); 1 -> correggi(c); 2 -> confirmDelete(c) }
-        }.setNegativeButton("ANNULLA", null).show()
+        val voci = mutableListOf<Pair<String, () -> Unit>>()
+        if (db.inAttesaDi(c.uuid)) {
+            voci.add("Correggi i dati e reinvia" to { correggi(c) })
+            voci.add("Scarta l'invio (indica il motivo)" to { scartaInvio(c) })
+        }
+        voci.add("Sposta in un'altra zona" to { spostaZona(c) })
+        if (!db.inAttesaDi(c.uuid)) voci.add("Correggi i dati" to { correggi(c) })
+        if (!c.sulServer) voci.add("Elimina dal telefono" to { confirmDelete(c) })
+        AlertDialog.Builder(this).setTitle(c.targa).setItems(voci.map { it.first }.toTypedArray()) { _, i -> voci[i].second() }
+            .setNegativeButton("ANNULLA", null).show()
+    }
+
+    /** Invii in attesa perché la targa è già nel piazzale sul portale: l'operatore sceglie per ciascuno. */
+    private fun mostraInAttesa() {
+        val elenco = db.operazioniInAttesa().distinctBy { it.uuid }.mapNotNull { o -> db.perUuid(o.uuid)?.let { it to o } }
+        if (elenco.isEmpty()) { refreshServer(); refreshSyncStatus(); return }
+        val voci = elenco.map { (c, o) -> "${c.targa} · zona ${c.zona} · ${c.data} ${c.ora.take(5)}\n${o.errore ?: "Targa già nel piazzale"}" }
+        AlertDialog.Builder(this).setTitle("Targhe già nel piazzale (${elenco.size})")
+            .setItems(voci.toTypedArray()) { _, i -> decidiAttesa(elenco[i].first) }
+            .setNegativeButton("CHIUDI", null).show()
+    }
+
+    private fun decidiAttesa(c: Censimento) {
+        AlertDialog.Builder(this).setTitle("${c.targa}: già nel piazzale")
+            .setMessage("${db.erroreDi(c.uuid) ?: "La targa risulta già nel piazzale sul portale."}\n\n" +
+                "Questo censimento non è stato inviato. Se la targa è sbagliata, correggila: l'invio riparte. " +
+                "Se è davvero lo stesso mezzo registrato due volte, scarta l'invio indicando il motivo.")
+            .setPositiveButton("CORREGGI") { _, _ -> correggi(c) }
+            .setNeutralButton("SCARTA…") { _, _ -> scartaInvio(c) }
+            .setNegativeButton("CHIUDI", null).show()
+    }
+
+    /** Rinuncia all'invio con un motivo obbligatorio (registrato sul portale). Un censimento mai arrivato al portale
+     *  viene tolto dal telefono (la foto resta nella galleria); uno già sul portale torna come sul portale. */
+    private fun scartaInvio(c: Censimento) {
+        val e = EditText(this)
+        stileCampo(e, "Motivo (es. mezzo già registrato da un altro tablet)")
+        e.minLines = 2
+        val box = LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(e) }
+        val d = AlertDialog.Builder(this).setTitle("Scartare l'invio di ${c.targa}?")
+            .setMessage(if (c.sulServer) "La modifica non verrà inviata: il mezzo tornerà come risulta sul portale."
+                        else "Il censimento non verrà inviato e sarà tolto da questo telefono (la foto resta nella galleria).")
+            .setView(box)
+            .setPositiveButton("SCARTA", null)
+            .setNegativeButton("ANNULLA", null).create()
+        d.setOnShowListener {
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val motivo = e.text.toString().trim()
+                if (motivo.length < 3) { e.error = "Indica il motivo"; return@setOnClickListener }
+                val o = db.operazioniInAttesa().firstOrNull { it.uuid == c.uuid }
+                val nomi = mapOf(TipoOp.INGRESSO to "entrata", TipoOp.CORREZIONE to "correzione", TipoOp.USCITA to "uscita", TipoOp.ZONA to "spostamento")
+                db.scartaOperazioni(c.uuid)
+                db.accoda(TipoOp.SCARTO, c.uuid, org.json.JSONObject().put("uuid", c.uuid).put("targa", c.targa).put("zona", c.zona)
+                    .put("data_ingresso", SyncEngine.isoIngresso(c)).put("operazione", nomi[o?.tipo] ?: (o?.tipo ?: ""))
+                    .put("errore", o?.errore ?: "").put("motivo", motivo))
+                if (c.sulServer) ServerConfig(this).cursore = null      // alla prossima sincronizzazione torna la versione del portale
+                else db.rimuoviPerUuid(c.uuid)
+                d.dismiss()
+                datiCambiati(); refreshServer()
+                toast("Invio di ${c.targa} scartato")
+            }
+        }
+        d.show()
     }
 
     private fun spostaZona(c: Censimento) {
@@ -939,6 +1034,7 @@ class MainActivity : Activity() {
             val v = android.content.ContentValues(); v.put("zona", z)
             db.aggiorna(c.id, v)
             db.accoda(TipoOp.ZONA, c.uuid, org.json.JSONObject().put("zona", z))
+            db.sblocca(c.uuid)
             datiCambiati(); toast("${c.targa} spostato in zona $z")
         }.setNegativeButton("ANNULLA", null).show()
     }
@@ -976,6 +1072,7 @@ class MainActivity : Activity() {
                 if (j.length() == 0) { toast("Nessuna modifica"); return@setPositiveButton }
                 db.aggiorna(c.id, v)
                 db.accoda(TipoOp.CORREZIONE, c.uuid, j)
+                db.sblocca(c.uuid)      // se era in attesa (targa già nel piazzale) l'invio riparte con i dati corretti
                 datiCambiati(); toast("Dati di ${nuovaTarga} corretti")
             }.setNegativeButton("ANNULLA", null).show()
     }
@@ -993,11 +1090,13 @@ class MainActivity : Activity() {
         val onClear: (() -> Unit)? = if (c.dataUscita == null) null else ({
             db.setUscita(c.id, null)
             db.accoda(TipoOp.USCITA, c.uuid, org.json.JSONObject().put("data_uscita", org.json.JSONObject.NULL))
+            db.sblocca(c.uuid)
             datiCambiati(); toast("Data di uscita rimossa: ${c.targa} risulta nel piazzale")
         })
         pickUscita(current, min, onClear) { d ->
             db.setUscita(c.id, d.format(D_FMT))
             db.accoda(TipoOp.USCITA, c.uuid, org.json.JSONObject().put("data_uscita", d.toString()))
+            db.sblocca(c.uuid)
             datiCambiati()
             toast("${c.targa}: uscita il ${d.format(D_FMT)}")
         }
@@ -1210,10 +1309,12 @@ class MainActivity : Activity() {
         val cfg = ServerConfig(this)
         val coda = db.inCoda()
         val ko = db.fallite()
+        val att = db.inAttesa()
         val err = cfg.ultimoErrore
         val (msg, color) = when {
             !cfg.collegato() -> (err ?: "Telefono non collegato al portale · tocca qui") + (if (coda > 0) " ($coda in attesa)" else "") to (if (err != null) RED else 0xFF757575.toInt())
             SyncEngine.running -> "⟳ Sincronizzazione con il portale…" + (if (coda > 0) " ($coda da inviare)" else "") to BLUE
+            att > 0 -> "⛔ $att " + (if (att == 1) "targa già nel piazzale" else "targhe già nel piazzale") + ": non inviate · tocca per correggere o scartare" to RED
             ko > 0 -> "⚠ $ko operazioni rifiutate dal portale · tocca per dettagli" to RED
             coda > 0 -> "⏳ $coda in attesa di invio" + (err?.let { " · $it" } ?: "") to ORANGE
             err != null -> "⚠ $err" to ORANGE
@@ -1294,7 +1395,7 @@ class MainActivity : Activity() {
         btnSyncOra.setOnClickListener { sincronizzaOra() }
         st.addView(btnSyncOra)
         btnFallite = button("OPERAZIONI RIFIUTATE DAL PORTALE", Color.WHITE, RED, RED, height = 52, size = 15f)
-        btnFallite.setOnClickListener { mostraFallite() }
+        btnFallite.setOnClickListener { if (db.inAttesa() > 0) mostraInAttesa() else mostraFallite() }
         st.addView(btnFallite)
         col.addView(st)
 
@@ -1336,6 +1437,8 @@ class MainActivity : Activity() {
             sb.append("\nIn attesa di invio: ").append(db.inCoda())
             val ko = db.fallite()
             if (ko > 0) sb.append("\nRifiutate dal portale: $ko")
+            val att = db.inAttesa()
+            if (att > 0) sb.append("\nIn attesa (targa già nel piazzale): $att")
             if (SyncEngine.running) sb.append("\n\n⟳ Sincronizzazione in corso…")
             else cfg.ultimoErrore?.let { sb.append("\n\nUltimo problema: $it") }
         }
@@ -1344,7 +1447,9 @@ class MainActivity : Activity() {
         tvServer.text = sb.toString()
         btnSyncOra.visibility = if (cfg.collegato()) View.VISIBLE else View.GONE
         btnSyncOra.isEnabled = !SyncEngine.running
-        btnFallite.visibility = if (db.fallite() > 0) View.VISIBLE else View.GONE
+        val inAtt = db.inAttesa()
+        btnFallite.text = if (inAtt > 0) "TARGHE GIÀ NEL PIAZZALE ($inAtt): DECIDI" else "OPERAZIONI RIFIUTATE DAL PORTALE"
+        btnFallite.visibility = if (db.fallite() > 0 || inAtt > 0) View.VISIBLE else View.GONE
         btnCollega.text = if (cfg.collegato()) "SCOLLEGA DAL PORTALE" else "COLLEGA AL PORTALE"
     }
 
@@ -1461,7 +1566,7 @@ class MainActivity : Activity() {
     private fun mostraFallite() {
         val ko = db.operazioniFallite()
         if (ko.isEmpty()) { refreshServer(); return }
-        val nomi = mapOf(TipoOp.INGRESSO to "Entrata", TipoOp.FOTO to "Foto", TipoOp.USCITA to "Uscita", TipoOp.ZONA to "Spostamento", TipoOp.CORREZIONE to "Correzione")
+        val nomi = mapOf(TipoOp.INGRESSO to "Entrata", TipoOp.FOTO to "Foto", TipoOp.USCITA to "Uscita", TipoOp.ZONA to "Spostamento", TipoOp.CORREZIONE to "Correzione", TipoOp.SCARTO to "Scarto")
         val testo = ko.take(30).joinToString("\n\n") { o ->
             val targa = db.perUuid(o.uuid)?.targa ?: "?"
             "• ${nomi[o.tipo] ?: o.tipo} $targa: ${o.errore ?: "errore"}"

@@ -87,6 +87,8 @@ class ErroreServer(val http: Int, val codice: String, msg: String) : IOException
     /** Errori definitivi per quell'operazione: riprovare non serve (dati non validi, permanenza eliminata, ...). */
     val definitivo: Boolean get() = http == 400 || http == 404 || http == 410 || http == 413
     val nonAutorizzato: Boolean get() = http == 401
+    /** La targa è già nel piazzale (portale 1.6+): l'invio resta in attesa di una decisione dell'operatore. */
+    val conflitto: Boolean get() = http == 409
 }
 
 /** Client HTTP minimo per le API /api/v1 (HttpURLConnection, senza librerie esterne). */
