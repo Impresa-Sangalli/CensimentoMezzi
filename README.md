@@ -5,7 +5,7 @@ Funziona **senza internet** e salva tutto sul telefono (database interno + foto 
 
 | | |
 |---|---|
-| Versione | 1.6 (`versionCode` 7) |
+| Versione | 1.7 (`versionCode` 8) |
 | Package | `it.impresasangalli.censimentomezzi` |
 | Android | 8.0 o superiore (`minSdk` 26, `targetSdk` 34) |
 | Linguaggio | Kotlin, solo componenti standard di Android (niente Jetpack Compose né librerie esterne) |
